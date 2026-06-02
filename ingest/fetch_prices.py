@@ -1,5 +1,6 @@
 import requests
 from datetime import date
+from store import save_prices
 
 PRICE_AREA = "NO1" # NO1 = Oslo (ostlandet)
 BASE_URL = "https://www.hvakosterstrommen.no/api/v1"
@@ -15,17 +16,8 @@ def fetch_prices(day: date, area: str):
 def main():
     today = date.today()
     prices = fetch_prices(today, PRICE_AREA)
-
-    print(f"Strompriser for {PRICE_AREA} den {today.isoformat()}:\n")
-    for hour in prices:
-        start = hour["time_start"][11:16]   # grabs "HH:MM" out of the timestamp
-        nok = hour["NOK_per_kWh"]
-        print(f"  {start}  {nok:.2f} kr/kWh")
-
-    values = [h["NOK_per_kWh"] for h in prices]
-    print(f"\n  Snitt:  {sum(values) / len(values):.2f} kr/kWh")
-    print(f"  Lavest: {min(values):.2f}  |  Hoyest: {max(values):.2f}")
-
+    saved = save_prices(prices, PRICE_AREA)
+    print(f"Lagret {saved} timer med priser for {PRICE_AREA} ({today.isoformat()}).")
 
 if __name__ == "__main__":
     main()
