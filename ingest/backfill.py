@@ -7,7 +7,7 @@ from fetch_prices import fetch_prices
 from store import save_prices
 
 PRICE_AREA = "NO1"
-DAYS_BACK = 1371
+DAYS_BACK = 7
 
 
 def daterange(start: date, end: date):

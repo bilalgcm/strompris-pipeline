@@ -1,15 +1,20 @@
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
+import anthropic
 import joblib
 import pandas as pd
 import psycopg
+from dotenv import load_dotenv
 from fastapi import FastAPI, Query
+
+load_dotenv()
 
 DB_CONN = "host=localhost port=5432 dbname=strompris user=strom password=strom"
 OSLO = ZoneInfo("Europe/Oslo")
 FEATURES = ["hour", "dayofweek", "month", "is_weekend", "lag_24h", "lag_168h"]
 MODEL = joblib.load("model/model.joblib")
+LLM = anthropic.Anthropic()
 
 app = FastAPI(title="Strompris API")
 
@@ -94,3 +99,38 @@ def forecast(area: str = "NO1"):
         {"time_start": t.isoformat(), "forecast_nok_per_kwh": round(float(p), 4)}
         for t, p in zip(times, preds)
     ]
+
+
+@app.get("/summary")
+def daily_summary(area: str = "NO1"):
+    today_prices = get_prices(area=area, frm=date.today(), to=date.today())
+    fcast = forecast(area=area)
+
+    def fmt(prices, key):
+        lines = []
+        for p in prices:
+            ts = datetime.fromisoformat(p["time_start"]).astimezone(OSLO)
+            lines.append(f"  kl {ts.strftime('%H:%M')}  {p[key]:.2f} kr/kWh")
+        return "\n".join(lines)
+
+    prompt = f"""Her er stromprisene for prisomraade {area}.
+
+Dagens faktiske priser:
+{fmt(today_prices, "nok_per_kwh")}
+
+Prognose neste 24 timer:
+{fmt(fcast, "forecast_nok_per_kwh")}
+
+Gi en kort, nyttig oppsummering paa norsk (3-5 setninger). Si naar stroemmen er billigst og dyrest i dag og i morgen, og gi et konkret tips om naar det loenner seg aa bruke stroem (f.eks. vaskemaskin, oppvaskmaskin)."""
+
+    response = LLM.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=300,
+        system="Du er en hjelpsom stromprisraadgiver for norske husholdninger. Gi korte, praktiske raad basert paa prisdata.",
+        messages=[{"role": "user", "content": prompt}],
+    )
+    return {
+        "area": area,
+        "date": date.today().isoformat(),
+        "summary": response.content[0].text,
+    }
