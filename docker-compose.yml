@@ -11,5 +11,17 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
 
+  app:
+    build: .
+    container_name: strompris-app
+    ports:
+      - "8000:8000"
+    environment:
+      DB_HOST: db
+    env_file:
+      - .env
+    depends_on:
+      - db
+
 volumes:
   pgdata:
