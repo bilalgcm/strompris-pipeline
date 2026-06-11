@@ -11,8 +11,10 @@ from fastapi import FastAPI, Query
 
 load_dotenv()
 
-DB_HOST = os.environ.get("DB_HOST", "localhost")
-DB_CONN = f"host={DB_HOST} port=5432 dbname=strompris user=strom password=strom"
+DB_CONN = os.environ.get(
+    "DATABASE_URL",
+    f"host={os.environ.get('DB_HOST', 'localhost')} port=5432 dbname=strompris user=strom password=strom"
+)
 OSLO = ZoneInfo("Europe/Oslo")
 FEATURES = ["hour", "dayofweek", "month", "is_weekend", "lag_24h", "lag_168h"]
 MODEL = joblib.load("model/model.joblib")
