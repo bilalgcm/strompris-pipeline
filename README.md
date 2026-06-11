@@ -2,7 +2,7 @@
 
 A real-time Norwegian electricity price platform with ML forecasting and LLM-powered insights — from data ingestion to cloud deployment.
 
-**[→ Live API](https://strompris-pipeline.fly.dev/docs)** · **[→ Live Forecast](https://strompris-pipeline.fly.dev/forecast)** · **[→ Live Summary](https://strompris-pipeline.fly.dev/summary)**
+**[→ Live Demo](https://strompris-pipeline.fly.dev/)** · **[→ API Docs](https://strompris-pipeline.fly.dev/docs)** · **[→ Forecast JSON](https://strompris-pipeline.fly.dev/forecast)**
 
 ## Why I Built This
 
