@@ -7,7 +7,11 @@ import joblib
 import pandas as pd
 import psycopg
 from dotenv import load_dotenv
+from pathlib import Path
+from pathlib import Path
 from fastapi import FastAPI, Query
+from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse
 
 load_dotenv()
 
@@ -20,7 +24,21 @@ FEATURES = ["hour", "dayofweek", "month", "is_weekend", "lag_24h", "lag_168h"]
 MODEL = joblib.load("model/model.joblib")
 LLM = anthropic.Anthropic()
 
+LANDING_HTML = Path("api/landing.html").read_text()
+
+LANDING_HTML = Path("api/landing.html").read_text()
+
 app = FastAPI(title="Strompris API")
+
+
+@app.get("/", response_class=HTMLResponse)
+def landing():
+    return LANDING_HTML
+
+
+@app.get("/", response_class=HTMLResponse)
+def landing():
+    return LANDING_HTML
 
 
 def run_query(sql, params):

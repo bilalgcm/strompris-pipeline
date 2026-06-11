@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="no">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Strømpris Pipeline</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #0b0f14; color: #e0e0e0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; line-height: 1.6; }
+  .container { max-width: 800px; margin: 0 auto; padding: 40px 20px; }
+
+  .hero { text-align: center; margin-bottom: 48px; }
+  .hero h1 { font-size: 2.4rem; color: #fff; margin-bottom: 8px; }
+  .hero p { color: #8a8f98; font-size: 1.05rem; }
+  .badge { display: inline-block; margin-top: 16px; padding: 6px 16px; background: rgba(29,158,117,0.15); color: #1D9E75; border: 1px solid rgba(29,158,117,0.3); border-radius: 20px; font-size: 0.85rem; }
+  .badge::before { content: ''; display: inline-block; width: 8px; height: 8px; background: #1D9E75; border-radius: 50%; margin-right: 8px; animation: pulse 2s infinite; }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+  .card { background: #141a22; border: 1px solid #1e2630; border-radius: 12px; padding: 24px; margin-bottom: 24px; }
+  .card h2 { font-size: 1.1rem; color: #8a8f98; margin-bottom: 12px; font-weight: 500; }
+
+  .summary-text { font-size: 1rem; color: #d0d0d0; line-height: 1.7; }
+  .summary-text strong { color: #fff; }
+  .loading { color: #555; font-style: italic; }
+
+  .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 24px; }
+  .stat { background: #141a22; border: 1px solid #1e2630; border-radius: 12px; padding: 20px; text-align: center; }
+  .stat-value { font-size: 1.5rem; font-weight: 700; color: #fff; }
+  .stat-label { font-size: 0.8rem; color: #8a8f98; margin-top: 4px; }
+
+  .chart-container { position: relative; height: 300px; }
+
+  .links { display: flex; gap: 12px; justify-content: center; margin-top: 40px; flex-wrap: wrap; }
+  .links a { padding: 10px 20px; border-radius: 8px; text-decoration: none; font-size: 0.9rem; transition: all 0.2s; }
+  .link-primary { background: #1D9E75; color: #fff; }
+  .link-primary:hover { background: #17865f; }
+  .link-secondary { background: #1e2630; color: #e0e0e0; border: 1px solid #2a3340; }
+  .link-secondary:hover { background: #2a3340; }
+
+  .footer { text-align: center; margin-top: 48px; color: #555; font-size: 0.8rem; }
+  .footer a { color: #1D9E75; text-decoration: none; }
+
+  @media (max-width: 500px) {
+    .hero h1 { font-size: 1.8rem; }
+    .stats { grid-template-columns: 1fr; }
+    .chart-container { height: 220px; }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <div class="hero">
+    <h1>⚡ Strømpris Pipeline</h1>
+    <p>Sanntids strømpriser, ML-prognose og AI-oppsummering for Norge</p>
+    <span class="badge">Live</span>
+  </div>
+
+  <div class="card" id="summary-card">
+    <h2>Dagens strømprisråd</h2>
+    <div class="summary-text" id="summary"><span class="loading">Henter oppsummering...</span></div>
+  </div>
+
+  <div class="stats" id="stats">
+    <div class="stat"><div class="stat-value" id="stat-avg">-</div><div class="stat-label">Snitt i dag</div></div>
+    <div class="stat"><div class="stat-value" id="stat-min">-</div><div class="stat-label">Lavest i dag</div></div>
+    <div class="stat"><div class="stat-value" id="stat-max">-</div><div class="stat-label">Høyest i dag</div></div>
+  </div>
+
+  <div class="card">
+    <h2>Priser og prognose</h2>
+    <div class="chart-container">
+      <canvas id="chart"></canvas>
+    </div>
+  </div>
+
+  <div class="links">
+    <a href="https://github.com/bilalgcm/strompris-pipeline" class="link-primary" target="_blank">GitHub</a>
+    <a href="/docs" class="link-secondary">API-dokumentasjon</a>
+    <a href="/forecast" class="link-secondary">Prognose (JSON)</a>
+    <a href="/summary" class="link-secondary">Oppsummering (JSON)</a>
+  </div>
+
+  <div class="footer">
+    Data fra <a href="https://www.hvakosterstrommen.no/" target="_blank">hvakosterstrommen.no</a> · Prognose: Gradient Boosting · Oppsummering: Claude Haiku
+  </div>
+
+</div>
+
+<script>
+const today = new Date().toISOString().slice(0, 10);
+
+async function loadSummary() {
+  try {
+    const res = await fetch('/summary');
+    const data = await res.json();
+    const el = document.getElementById('summary');
+    el.innerHTML = data.summary.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/\n/g, '<br>');
+  } catch (e) {
+    document.getElementById('summary').textContent = 'Kunne ikke hente oppsummering.';
+  }
+}
+
+async function loadChart() {
+  try {
+    const [pricesRes, forecastRes] = await Promise.all([
+      fetch(`/prices?from=${today}&to=${today}`),
+      fetch('/forecast')
+    ]);
+    const prices = await pricesRes.json();
+    const forecast = await forecastRes.json();
+
+    const toOslo = (iso) => new Date(iso).toLocaleTimeString('no-NO', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Oslo' });
+    const toOsloLabel = (iso) => new Date(iso).toLocaleString('no-NO', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Oslo' });
+
+    const allLabels = [
+      ...prices.map(p => toOsloLabel(p.time_start)),
+      ...forecast.map(p => toOsloLabel(p.time_start))
+    ];
+
+    const actualData = prices.map(p => p.nok_per_kwh);
+    const forecastData = new Array(prices.length).fill(null).concat(forecast.map(p => p.forecast_nok_per_kwh));
+
+    // Stats
+    if (actualData.length > 0) {
+      const avg = actualData.reduce((a, b) => a + b, 0) / actualData.length;
+      document.getElementById('stat-avg').textContent = avg.toFixed(2) + ' kr';
+      document.getElementById('stat-min').textContent = Math.min(...actualData).toFixed(2) + ' kr';
+      document.getElementById('stat-max').textContent = Math.max(...actualData).toFixed(2) + ' kr';
+    }
+
+    new Chart(document.getElementById('chart'), {
+      type: 'line',
+      data: {
+        labels: allLabels,
+        datasets: [
+          { label: 'Faktisk', data: actualData.concat(new Array(forecast.length).fill(null)), borderColor: '#1D9E75', backgroundColor: 'rgba(29,158,117,0.1)', fill: true, tension: 0.3, pointRadius: 0 },
+          { label: 'Prognose', data: forecastData, borderColor: '#D85A30', borderDash: [6, 3], backgroundColor: 'rgba(216,90,48,0.1)', fill: true, tension: 0.3, pointRadius: 0 }
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { labels: { color: '#8a8f98', usePointStyle: true, pointStyle: 'line' } },
+          tooltip: { mode: 'index', intersect: false, callbacks: { label: (c) => c.parsed.y !== null ? c.dataset.label + ': ' + c.parsed.y.toFixed(3) + ' kr/kWh' : null } }
+        },
+        scales: {
+          x: { ticks: { color: '#555', maxTicksLimit: 8, maxRotation: 0 }, grid: { color: 'rgba(255,255,255,0.05)' } },
+          y: { ticks: { color: '#555', callback: (v) => v.toFixed(2) }, grid: { color: 'rgba(255,255,255,0.05)' }, title: { display: true, text: 'kr/kWh', color: '#555' } }
+        },
+        interaction: { mode: 'nearest', axis: 'x' }
+      }
+    });
+  } catch (e) {
+    console.error('Chart error:', e);
+  }
+}
+
+loadSummary();
+loadChart();
+</script>
+</body>
+</html>
