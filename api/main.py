@@ -8,9 +8,7 @@ import pandas as pd
 import psycopg
 from dotenv import load_dotenv
 from pathlib import Path
-from pathlib import Path
 from fastapi import FastAPI, Query
-from fastapi.responses import HTMLResponse
 from fastapi.responses import HTMLResponse
 
 load_dotenv()
@@ -36,9 +34,6 @@ def landing():
     return LANDING_HTML
 
 
-@app.get("/", response_class=HTMLResponse)
-def landing():
-    return LANDING_HTML
 
 
 def run_query(sql, params):
