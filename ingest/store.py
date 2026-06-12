@@ -1,7 +1,8 @@
+import os
 from datetime import datetime
 import psycopg
 
-DB_CONN = "host=localhost port=5432 dbname=strompris user=strom password=strom"
+DB_CONN = os.environ.get("DATABASE_URL", "host=localhost port=5432 dbname=strompris user=strom password=strom")
 
 UPSERT_SQL = """
     INSERT INTO prices (price_area, time_start, nok_per_kwh, eur_per_kwh, exr)

@@ -1,0 +1,32 @@
+name: Fetch Daily Prices
+
+on:
+  schedule:
+    - cron: '0 20 * * *'  # 20:00 UTC = 22:00 Oslo (summer)
+  workflow_dispatch:
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: pip install requests "psycopg[binary]"
+      - name: Fetch today and tomorrow
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          cd ingest && python -c "
+          from datetime import date, timedelta
+          from fetch_prices import fetch_prices
+          from store import save_prices
+          for d in [date.today(), date.today() + timedelta(days=1)]:
+              try:
+                  prices = fetch_prices(d, 'NO1')
+                  save_prices(prices, 'NO1')
+                  print(f'{d}: {len(prices)} timer lagret')
+              except Exception as e:
+                  print(f'{d}: hoppet over ({e})')
+          "
