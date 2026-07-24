@@ -2,7 +2,7 @@ name: Fetch Daily Prices
 
 on:
   schedule:
-    - cron: '0 20 * * *'  # 20:00 UTC = 22:00 Oslo (summer)
+    - cron: '0 20 * * *'
   workflow_dispatch:
 
 jobs:
@@ -14,7 +14,7 @@ jobs:
         with:
           python-version: '3.13'
       - run: pip install requests "psycopg[binary]"
-      - name: Fetch today and tomorrow
+      - name: Fetch prices and weather
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: |
@@ -22,11 +22,22 @@ jobs:
           from datetime import date, timedelta
           from fetch_prices import fetch_prices
           from store import save_prices
+          from fetch_weather import fetch_weather, save_weather
+
           for d in [date.today(), date.today() + timedelta(days=1)]:
               try:
                   prices = fetch_prices(d, 'NO1')
                   save_prices(prices, 'NO1')
-                  print(f'{d}: {len(prices)} timer lagret')
+                  print(f'Prices {d}: {len(prices)} timer')
               except Exception as e:
-                  print(f'{d}: hoppet over ({e})')
+                  print(f'Prices {d}: hoppet over ({e})')
+
+          start = (date.today() - timedelta(days=3)).isoformat()
+          end = (date.today() + timedelta(days=1)).isoformat()
+          try:
+              times, temps = fetch_weather(start, end)
+              saved = save_weather(times, temps)
+              print(f'Weather: {saved} timer lagret')
+          except Exception as e:
+              print(f'Weather: feilet ({e})')
           "
