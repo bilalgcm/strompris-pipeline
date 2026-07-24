@@ -42,3 +42,26 @@ jobs:
           except Exception as e:
               print(f'Weather: feilet ({e})')
           "
+      - name: Save forecasts
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          python -c "
+          import json, os, psycopg, requests
+          from datetime import datetime, timezone
+
+          NEON = os.environ['DATABASE_URL']
+          for area in ['NO1', 'NO2', 'NO3', 'NO4', 'NO5']:
+              try:
+                  data = requests.get(f'https://strompris-pipeline.fly.dev/forecast?area={area}').json()
+                  with psycopg.connect(NEON) as conn:
+                      with conn.cursor() as cur:
+                          for p in data:
+                              cur.execute(
+                                  'INSERT INTO forecasts (price_area, time_start, forecast_nok_per_kwh) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING',
+                                  (area, p['time_start'], p['forecast_nok_per_kwh'])
+                              )
+                  print(f'Forecast {area}: {len(data)} timer lagret')
+              except Exception as e:
+                  print(f'Forecast {area}: feilet ({e})')
+          "

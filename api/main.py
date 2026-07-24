@@ -187,6 +187,42 @@ Svar kort og nyttig paa norsk (maks 3-4 setninger). Hvis spoersmaalet handler om
         "answer": response.content[0].text,
     }
 
+
+@app.get("/accuracy")
+def accuracy(area: str = "NO1", days: int = 7):
+    """Compare stored forecasts against actual prices."""
+    cutoff = (datetime.now(OSLO) - timedelta(days=days)).isoformat()
+    rows = run_query(
+        """
+        SELECT f.time_start,
+               f.forecast_nok_per_kwh,
+               p.nok_per_kwh,
+               abs(f.forecast_nok_per_kwh - p.nok_per_kwh) as error
+        FROM forecasts f
+        JOIN prices p ON f.price_area = p.price_area AND f.time_start = p.time_start
+        WHERE f.price_area = %s
+          AND f.time_start >= %s
+        ORDER BY f.time_start;
+        """,
+        (area, cutoff),
+    )
+    if not rows:
+        return {"area": area, "days": days, "message": "Ingen prognoser aa sammenligne ennaa. Data samles inn nattlig."}
+    errors = [float(r[3]) for r in rows]
+    actuals = [float(r[2]) for r in rows]
+    mae = sum(errors) / len(errors)
+    mape = sum(e / a for e, a in zip(errors, actuals) if a > 0) / len(errors) * 100
+    return {
+        "area": area,
+        "days": days,
+        "hours_compared": len(rows),
+        "mae_kr_per_kwh": round(mae, 4),
+        "mae_ore": round(mae * 100, 1),
+        "accuracy_pct": round(100 - mape, 1),
+        "worst_miss_kr": round(max(errors), 4),
+        "best_hit_kr": round(min(errors), 4),
+    }
+
 @app.get("/summary")
 def daily_summary(area: str = "NO1"):
     today_prices = get_prices(area=area, frm=date.today(), to=date.today())
