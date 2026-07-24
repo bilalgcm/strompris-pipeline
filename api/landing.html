@@ -98,6 +98,8 @@
 <script>
 const today = new Date().toISOString().slice(0, 10);
 
+let priceChart = null;
+
 function getArea() { return document.getElementById('area').value; }
 
 async function loadSummary() {
@@ -139,7 +141,8 @@ async function loadChart() {
       document.getElementById('stat-max').textContent = Math.max(...actualData).toFixed(2) + ' kr';
     }
 
-    new Chart(document.getElementById('chart'), {
+    if (priceChart) priceChart.destroy();
+    priceChart = new Chart(document.getElementById('chart'), {
       type: 'line',
       data: {
         labels: allLabels,
