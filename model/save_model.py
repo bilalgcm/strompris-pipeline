@@ -1,7 +1,6 @@
 import joblib
-from sklearn.ensemble import HistGradientBoostingRegressor
-
 from features import build_features
+from sklearn.ensemble import HistGradientBoostingRegressor
 
 FEATURES = ["hour", "dayofweek", "month", "is_weekend", "lag_24h", "lag_168h", "temperature", "temp_24h"]
 TARGET = "price"

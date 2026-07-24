@@ -1,0 +1,8 @@
+[lint]
+ignore = [
+    "DTZ011",  # date.today() is fine — we only run in one timezone
+    "B008",    # Query() in defaults is standard FastAPI pattern
+    "BLE001",  # broad except is intentional in dashboard error handling
+    "C408",    # dict() vs {} is stylistic
+    "SIM117",  # nested with statements are more readable here
+]

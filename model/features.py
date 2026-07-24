@@ -1,7 +1,7 @@
 import os
 
-import psycopg
 import pandas as pd
+import psycopg
 
 DB_CONN = os.environ.get(
     "DATABASE_URL",

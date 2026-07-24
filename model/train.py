@@ -1,9 +1,7 @@
-from sklearn.linear_model import LinearRegression
+from baseline import CUTOFF, split_by_time
+from features import build_features
 from sklearn.ensemble import HistGradientBoostingRegressor
 from sklearn.metrics import mean_absolute_error
-
-from features import build_features
-from baseline import split_by_time, CUTOFF
 
 FEATURES_OLD = ["hour", "dayofweek", "month", "is_weekend", "lag_24h", "lag_168h"]
 FEATURES_NEW = FEATURES_OLD + ["temperature", "temp_24h"]

@@ -2,7 +2,6 @@ import time
 from datetime import date, timedelta
 
 import requests
-
 from fetch_prices import fetch_prices
 from store import save_prices
 

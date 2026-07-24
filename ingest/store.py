@@ -1,5 +1,6 @@
 import os
 from datetime import datetime
+
 import psycopg
 
 DB_CONN = os.environ.get("DATABASE_URL", "host=localhost port=5432 dbname=strompris user=strom password=strom")
@@ -27,7 +28,6 @@ def save_prices(prices, area):
         )
         for hour in prices
     ]
-    with psycopg.connect(DB_CONN) as conn:
-        with conn.cursor() as cur:
-            cur.executemany(UPSERT_SQL, rows)
+    with psycopg.connect(DB_CONN) as conn, conn.cursor() as cur:
+        cur.executemany(UPSERT_SQL, rows)
     return len(rows)

@@ -1,5 +1,6 @@
-import requests
 from datetime import date
+
+import requests
 from store import save_prices
 
 PRICE_AREA = "NO1" # NO1 = Oslo (ostlandet)

@@ -1,7 +1,6 @@
 import pandas as pd
-from sklearn.metrics import mean_absolute_error
-
 from features import build_features
+from sklearn.metrics import mean_absolute_error
 
 CUTOFF = "2025-06-03"
 

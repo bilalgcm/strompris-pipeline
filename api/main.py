@@ -1,13 +1,14 @@
-from datetime import date, datetime, timedelta
 import os
+from datetime import date, datetime, timedelta
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import anthropic
 import joblib
 import pandas as pd
 import psycopg
+import requests
 from dotenv import load_dotenv
-from pathlib import Path
 from fastapi import FastAPI, Query
 from fastapi.responses import HTMLResponse
 
@@ -37,10 +38,9 @@ def landing():
 
 
 def run_query(sql, params):
-    with psycopg.connect(DB_CONN) as conn:
-        with conn.cursor() as cur:
-            cur.execute(sql, params)
-            return cur.fetchall()
+    with psycopg.connect(DB_CONN) as conn, conn.cursor() as cur:
+        cur.execute(sql, params)
+        return cur.fetchall()
 
 
 @app.get("/health")

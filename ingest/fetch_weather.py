@@ -1,8 +1,8 @@
 import os
 from datetime import date, datetime, timezone
 
-import requests
 import psycopg
+import requests
 
 DB_CONN = os.environ.get(
     "DATABASE_URL",
@@ -36,15 +36,14 @@ def save_weather(times, temps, location="oslo"):
         for t, temp in zip(times, temps)
         if temp is not None
     ]
-    with psycopg.connect(DB_CONN) as conn:
-        with conn.cursor() as cur:
-            cur.executemany(
-                """INSERT INTO weather (location, time_start, temperature)
+    with psycopg.connect(DB_CONN) as conn, conn.cursor() as cur:
+        cur.executemany(
+            """INSERT INTO weather (location, time_start, temperature)
                    VALUES (%s, %s, %s)
                    ON CONFLICT (location, time_start)
                    DO UPDATE SET temperature = EXCLUDED.temperature;""",
-                rows,
-            )
+            rows,
+        )
     return len(rows)
 
 
