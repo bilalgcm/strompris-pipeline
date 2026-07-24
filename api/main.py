@@ -151,6 +151,42 @@ def forecast(area: str = "NO1"):
     ]
 
 
+
+@app.get("/ask")
+def ask_question(q: str, area: str = "NO1"):
+    """Answer a freeform question using real price data."""
+    today_prices = get_prices(area=area, frm=date.today(), to=date.today())
+    fcast = forecast(area=area)
+
+    def fmt(prices, key):
+        lines = []
+        for p in prices:
+            ts = datetime.fromisoformat(p["time_start"]).astimezone(OSLO)
+            lines.append(f"  kl {ts.strftime('%H:%M')}: {p[key]:.2f} kr/kWh")
+        return "\n".join(lines)
+
+    prompt = f"""Prisdata for {area} i dag:
+{fmt(today_prices, "nok_per_kwh")}
+
+Prognose neste 24 timer:
+{fmt(fcast, "forecast_nok_per_kwh")}
+
+Spoersmaal fra bruker: {q}
+
+Svar kort og nyttig paa norsk (maks 3-4 setninger). Hvis spoersmaalet handler om stroemforbruk, estimer wattforbruk for apparatet, regn ut kWh, og bruk faktiske timepriser fra dataen over til aa gi et konkret kostnadsestimat i kroner. Hvis spoersmaalet ikke handler om stroem, si hoeflig at du kun kan svare paa stroemrelaterte spoersmaal."""
+
+    response = LLM.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=300,
+        system="Du er en hjelpsom stroemassistent for norske husholdninger. Du har tilgang til faktiske timepriser og prognoser. Gi konkrete, nyttige svar basert paa reelle data.",
+        messages=[{"role": "user", "content": prompt}],
+    )
+    return {
+        "area": area,
+        "question": q,
+        "answer": response.content[0].text,
+    }
+
 @app.get("/summary")
 def daily_summary(area: str = "NO1"):
     today_prices = get_prices(area=area, frm=date.today(), to=date.today())

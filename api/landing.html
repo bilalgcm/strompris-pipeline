@@ -69,6 +69,16 @@
     <div class="summary-text" id="summary"><span class="loading">Henter oppsummering...</span></div>
   </div>
 
+
+  <div class="card" id="ask-card">
+    <h2>Spør om strøm</h2>
+    <div style="display:flex; gap:8px;">
+      <input type="text" id="ask-input" placeholder="F.eks: Jeg glemte vifta på i 10 timer, hva koster det?" style="flex:1; padding:10px 14px; background:#0b0f14; color:#e0e0e0; border:1px solid #2a3340; border-radius:8px; font-size:0.95rem; outline:none;" />
+      <button id="ask-btn" onclick="askQuestion()" style="padding:10px 20px; background:#1D9E75; color:#fff; border:none; border-radius:8px; font-size:0.95rem; cursor:pointer; white-space:nowrap;">Spør</button>
+    </div>
+    <div id="ask-answer" style="margin-top:14px; color:#d0d0d0; line-height:1.7; display:none;"></div>
+  </div>
+
   <div class="stats" id="stats">
     <div class="stat"><div class="stat-value" id="stat-avg">-</div><div class="stat-label">Snitt i dag</div></div>
     <div class="stat"><div class="stat-value" id="stat-min">-</div><div class="stat-label">Lavest i dag</div></div>
@@ -169,6 +179,34 @@ async function loadChart() {
     console.error('Chart error:', e);
   }
 }
+
+
+async function askQuestion() {
+  const input = document.getElementById('ask-input');
+  const answer = document.getElementById('ask-answer');
+  const btn = document.getElementById('ask-btn');
+  const q = input.value.trim();
+  if (!q) return;
+
+  btn.textContent = 'Tenker...';
+  btn.disabled = true;
+  answer.style.display = 'block';
+  answer.innerHTML = '<span class="loading">Henter svar...</span>';
+
+  try {
+    const res = await fetch('/ask?area=' + getArea() + '&q=' + encodeURIComponent(q));
+    const data = await res.json();
+    answer.innerHTML = data.answer.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/\n/g, '<br>');
+  } catch (e) {
+    answer.textContent = 'Kunne ikke hente svar. Prøv igjen.';
+  }
+  btn.textContent = 'Spør';
+  btn.disabled = false;
+}
+
+document.getElementById('ask-input').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') askQuestion();
+});
 
 function loadAll() { loadSummary(); loadChart(); }
 document.getElementById('area').addEventListener('change', loadAll);
