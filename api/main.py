@@ -18,7 +18,7 @@ DB_CONN = os.environ.get(
     f"host={os.environ.get('DB_HOST', 'localhost')} port=5432 dbname=strompris user=strom password=strom"
 )
 OSLO = ZoneInfo("Europe/Oslo")
-FEATURES = ["hour", "dayofweek", "month", "is_weekend", "lag_24h", "lag_168h"]
+FEATURES = ["hour", "dayofweek", "month", "is_weekend", "lag_24h", "lag_168h", "temperature", "temp_24h"]
 MODEL = joblib.load("model/model.joblib")
 LLM = anthropic.Anthropic()
 
@@ -88,14 +88,45 @@ def prices_by_hour(area: str = "NO1"):
     return [{"hour": int(h), "avg_nok_per_kwh": float(p)} for h, p in rows]
 
 
+def fetch_forecast_temps():
+    """Fetch next 48h of temperature forecasts from Open-Meteo."""
+    try:
+        resp = requests.get("https://api.open-meteo.com/v1/forecast", params={
+            "latitude": 59.91, "longitude": 10.75,
+            "hourly": "temperature_2m", "timezone": "UTC",
+            "forecast_days": 3,
+        })
+        resp.raise_for_status()
+        data = resp.json()
+        from datetime import datetime as dt_cls
+        return {
+            dt_cls.fromisoformat(t).replace(tzinfo=OSLO.tzinfo if False else __import__("datetime").timezone.utc): temp
+            for t, temp in zip(data["hourly"]["time"], data["hourly"]["temperature_2m"])
+            if temp is not None
+        }
+    except Exception:
+        return {}
+
+
 @app.get("/forecast")
 def forecast(area: str = "NO1"):
     rows = run_query(
         "SELECT time_start, nok_per_kwh FROM prices WHERE price_area = %s ORDER BY time_start DESC LIMIT 200;",
         (area,),
     )
-    known = {ts: float(p) for ts, p in rows}
-    latest = max(known)
+    known_prices = {ts: float(p) for ts, p in rows}
+    latest = max(known_prices)
+
+    # Get recent temperatures from DB
+    temp_rows = run_query(
+        "SELECT time_start, temperature FROM weather WHERE location = %s ORDER BY time_start DESC LIMIT 200;",
+        ("oslo",),
+    )
+    known_temps = {ts: float(t) for ts, t in temp_rows}
+
+    # Get forecast temperatures for future hours
+    forecast_temps = fetch_forecast_temps()
+    known_temps.update(forecast_temps)
 
     future, times = [], []
     for h in range(1, 25):
@@ -106,8 +137,10 @@ def forecast(area: str = "NO1"):
             "dayofweek": local.weekday(),
             "month": local.month,
             "is_weekend": 1 if local.weekday() >= 5 else 0,
-            "lag_24h": known.get(t - timedelta(hours=24)),
-            "lag_168h": known.get(t - timedelta(hours=168)),
+            "lag_24h": known_prices.get(t - timedelta(hours=24)),
+            "lag_168h": known_prices.get(t - timedelta(hours=168)),
+            "temperature": known_temps.get(t),
+            "temp_24h": known_temps.get(t - timedelta(hours=24)),
         })
         times.append(t)
 

@@ -1,11 +1,15 @@
+import os
+
 import psycopg
 import pandas as pd
 
-DB_CONN = "host=localhost port=5432 dbname=strompris user=strom password=strom"
+DB_CONN = os.environ.get(
+    "DATABASE_URL",
+    "host=localhost port=5432 dbname=strompris user=strom password=strom",
+)
 
 
 def load_prices(area="NO1"):
-    """Pull all hourly prices for an area out of Postgres into a DataFrame."""
     with psycopg.connect(DB_CONN) as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -19,19 +23,37 @@ def load_prices(area="NO1"):
     return df
 
 
-def build_features(area="NO1"):
-    """Turn the raw price series into a table of features + a target."""
-    df = load_prices(area)
-    local = df["time_start"].dt.tz_convert("Europe/Oslo")
+def load_weather(location="oslo"):
+    with psycopg.connect(DB_CONN) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT time_start, temperature FROM weather WHERE location = %s ORDER BY time_start;",
+                (location,),
+            )
+            rows = cur.fetchall()
+    df = pd.DataFrame(rows, columns=["time_start", "temperature"])
+    df["time_start"] = pd.to_datetime(df["time_start"], utc=True)
+    df["temperature"] = df["temperature"].astype(float)
+    return df
 
+
+def build_features(area="NO1"):
+    df = load_prices(area)
+    weather = load_weather()
+
+    # Merge temperature onto prices by timestamp
+    df = pd.merge(df, weather, on="time_start", how="left")
+
+    local = df["time_start"].dt.tz_convert("Europe/Oslo")
     df["hour"] = local.dt.hour
-    df["dayofweek"] = local.dt.dayofweek          # 0 = Monday, 6 = Sunday
+    df["dayofweek"] = local.dt.dayofweek
     df["month"] = local.dt.month
     df["is_weekend"] = (local.dt.dayofweek >= 5).astype(int)
-    df["lag_24h"] = df["price"].shift(24)         # price one day earlier
-    df["lag_168h"] = df["price"].shift(168)       # price one week earlier
+    df["lag_24h"] = df["price"].shift(24)
+    df["lag_168h"] = df["price"].shift(168)
+    df["temp_24h"] = df["temperature"].shift(24)
 
-    df = df.dropna().reset_index(drop=True)        # drop the first week (no lags yet)
+    df = df.dropna().reset_index(drop=True)
     return df
 
 
@@ -41,5 +63,5 @@ if __name__ == "__main__":
     print("Columns:", list(df.columns))
     print("\nFirst rows:")
     print(df.head().to_string())
-    print("\nPrice summary:")
-    print(df["price"].describe().round(3))
+    print("\nTemperature summary:")
+    print(df["temperature"].describe().round(1))
