@@ -24,13 +24,14 @@ jobs:
           from store import save_prices
           from fetch_weather import fetch_weather, save_weather
 
-          for d in [date.today(), date.today() + timedelta(days=1)]:
-              try:
-                  prices = fetch_prices(d, 'NO1')
-                  save_prices(prices, 'NO1')
-                  print(f'Prices {d}: {len(prices)} timer')
-              except Exception as e:
-                  print(f'Prices {d}: hoppet over ({e})')
+          for area in ['NO1', 'NO2', 'NO3', 'NO4', 'NO5']:
+              for d in [date.today(), date.today() + timedelta(days=1)]:
+                  try:
+                      prices = fetch_prices(d, area)
+                      save_prices(prices, area)
+                      print(f'Prices {area} {d}: {len(prices)} timer')
+                  except Exception as e:
+                      print(f'Prices {area} {d}: hoppet over ({e})')
 
           start = (date.today() - timedelta(days=3)).isoformat()
           end = (date.today() + timedelta(days=1)).isoformat()

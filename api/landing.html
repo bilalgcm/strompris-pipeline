@@ -55,6 +55,13 @@
     <h1>⚡ Strømpris Pipeline</h1>
     <p>Sanntids strømpriser, ML-prognose og AI-oppsummering for Norge</p>
     <span class="badge">Live</span>
+    <select id="area" style="margin-top:16px; padding:8px 16px; background:#141a22; color:#e0e0e0; border:1px solid #2a3340; border-radius:8px; font-size:0.95rem; cursor:pointer; outline:none;">
+      <option value="NO1">NO1 – Østlandet</option>
+      <option value="NO2">NO2 – Sørlandet</option>
+      <option value="NO3">NO3 – Midt-Norge</option>
+      <option value="NO4">NO4 – Nord-Norge</option>
+      <option value="NO5">NO5 – Vestlandet</option>
+    </select>
   </div>
 
   <div class="card" id="summary-card">
@@ -91,9 +98,11 @@
 <script>
 const today = new Date().toISOString().slice(0, 10);
 
+function getArea() { return document.getElementById('area').value; }
+
 async function loadSummary() {
   try {
-    const res = await fetch('/summary');
+    const res = await fetch('/summary?area=' + getArea());
     const data = await res.json();
     const el = document.getElementById('summary');
     el.innerHTML = data.summary.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/\n/g, '<br>');
@@ -105,8 +114,8 @@ async function loadSummary() {
 async function loadChart() {
   try {
     const [pricesRes, forecastRes] = await Promise.all([
-      fetch(`/prices?from=${today}&to=${today}`),
-      fetch('/forecast')
+      fetch(`/prices?from=${today}&to=${today}&area=${getArea()}`),
+      fetch('/forecast?area=' + getArea())
     ]);
     const prices = await pricesRes.json();
     const forecast = await forecastRes.json();
@@ -158,8 +167,9 @@ async function loadChart() {
   }
 }
 
-loadSummary();
-loadChart();
+function loadAll() { loadSummary(); loadChart(); }
+document.getElementById('area').addEventListener('change', loadAll);
+loadAll();
 </script>
 </body>
 </html>
