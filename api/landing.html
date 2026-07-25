@@ -55,6 +55,7 @@
     <h1>⚡ Strømpris Pipeline</h1>
     <p>Sanntids strømpriser, ML-prognose og AI-oppsummering for Norge</p>
     <span class="badge">Live</span>
+    <span class="badge" id="accuracy-badge" style="display:none; background:rgba(99,153,34,0.15); color:#639922; border-color:rgba(99,153,34,0.3);"></span>
     <select id="area" style="margin-top:16px; padding:8px 16px; background:#141a22; color:#e0e0e0; border:1px solid #2a3340; border-radius:8px; font-size:0.95rem; cursor:pointer; outline:none;">
       <option value="NO1">NO1 – Østlandet</option>
       <option value="NO2">NO2 – Sørlandet</option>
@@ -208,7 +209,20 @@ document.getElementById('ask-input').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') askQuestion();
 });
 
-function loadAll() { loadSummary(); loadChart(); }
+
+async function loadAccuracy() {
+  try {
+    const res = await fetch('/accuracy?area=' + getArea());
+    const data = await res.json();
+    const badge = document.getElementById('accuracy-badge');
+    if (data.accuracy_pct) {
+      badge.textContent = 'Treffsikkerhet: ' + data.accuracy_pct + '%';
+      badge.style.display = 'inline-block';
+    }
+  } catch (e) {}
+}
+
+function loadAll() { loadSummary(); loadChart(); loadAccuracy(); }
 document.getElementById('area').addEventListener('change', loadAll);
 loadAll();
 </script>
