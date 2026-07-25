@@ -8,43 +8,89 @@
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { background: #0b0f14; color: #e0e0e0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; line-height: 1.6; }
-  .container { max-width: 800px; margin: 0 auto; padding: 40px 20px; }
+  .container { max-width: 820px; margin: 0 auto; padding: 40px 20px; }
 
-  .hero { text-align: center; margin-bottom: 48px; }
-  .hero h1 { font-size: 2.4rem; color: #fff; margin-bottom: 8px; }
-  .hero p { color: #8a8f98; font-size: 1.05rem; }
-  .badge { display: inline-block; margin-top: 16px; padding: 6px 16px; background: rgba(29,158,117,0.15); color: #1D9E75; border: 1px solid rgba(29,158,117,0.3); border-radius: 20px; font-size: 0.85rem; }
-  .badge::before { content: ''; display: inline-block; width: 8px; height: 8px; background: #1D9E75; border-radius: 50%; margin-right: 8px; animation: pulse 2s infinite; }
+  /* Hero */
+  .hero { text-align: center; margin-bottom: 40px; }
+  .hero h1 { font-size: 2.4rem; color: #fff; margin-bottom: 6px; }
+  .hero p { color: #8a8f98; font-size: 1.05rem; margin-bottom: 16px; }
+  .hero-badges { display: flex; align-items: center; justify-content: center; gap: 10px; flex-wrap: wrap; }
+
+  .badge { display: inline-flex; align-items: center; padding: 6px 14px; border-radius: 20px; font-size: 0.82rem; font-weight: 500; }
+  .badge-live { background: rgba(29,158,117,0.15); color: #1D9E75; border: 1px solid rgba(29,158,117,0.3); }
+  .badge-live::before { content: ''; width: 7px; height: 7px; background: #1D9E75; border-radius: 50%; margin-right: 7px; animation: pulse 2s infinite; }
+  .badge-accuracy { background: rgba(99,153,34,0.15); color: #639922; border: 1px solid rgba(99,153,34,0.3); display: none; }
   @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
 
-  .card { background: #141a22; border: 1px solid #1e2630; border-radius: 12px; padding: 24px; margin-bottom: 24px; }
-  .card h2 { font-size: 1.1rem; color: #8a8f98; margin-bottom: 12px; font-weight: 500; }
+  .zone-select { padding: 7px 14px; background: #141a22; color: #e0e0e0; border: 1px solid #2a3340; border-radius: 8px; font-size: 0.9rem; cursor: pointer; outline: none; }
 
-  .summary-text { font-size: 1rem; color: #d0d0d0; line-height: 1.7; }
+  /* Cards */
+  .card { background: #141a22; border: 1px solid #1e2630; border-radius: 12px; padding: 24px; margin-bottom: 20px; }
+  .card h2 { font-size: 1rem; color: #8a8f98; margin-bottom: 10px; font-weight: 500; letter-spacing: 0.02em; }
+  .summary-text { font-size: 0.95rem; color: #d0d0d0; line-height: 1.75; }
   .summary-text strong { color: #fff; }
   .loading { color: #555; font-style: italic; }
 
-  .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 24px; }
-  .stat { background: #141a22; border: 1px solid #1e2630; border-radius: 12px; padding: 20px; text-align: center; }
-  .stat-value { font-size: 1.5rem; font-weight: 700; color: #fff; }
-  .stat-label { font-size: 0.8rem; color: #8a8f98; margin-top: 4px; }
+  /* Q&A */
+  .ask-row { display: flex; gap: 8px; }
+  .ask-input { flex: 1; padding: 10px 14px; background: #0b0f14; color: #e0e0e0; border: 1px solid #2a3340; border-radius: 8px; font-size: 0.9rem; outline: none; }
+  .ask-input:focus { border-color: #1D9E75; }
+  .ask-input::placeholder { color: #555; }
+  .ask-btn { padding: 10px 20px; background: #1D9E75; color: #fff; border: none; border-radius: 8px; font-size: 0.9rem; cursor: pointer; white-space: nowrap; transition: background 0.2s; }
+  .ask-btn:hover { background: #17865f; }
+  .ask-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+  .ask-answer { margin-top: 14px; color: #d0d0d0; line-height: 1.7; display: none; }
 
+  /* Stats */
+  .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 20px; }
+  .stat { background: #141a22; border: 1px solid #1e2630; border-radius: 12px; padding: 18px; text-align: center; }
+  .stat-value { font-size: 1.4rem; font-weight: 700; color: #fff; }
+  .stat-label { font-size: 0.78rem; color: #8a8f98; margin-top: 4px; }
+
+  /* Chart */
   .chart-container { position: relative; height: 300px; }
 
-  .links { display: flex; gap: 12px; justify-content: center; margin-top: 40px; flex-wrap: wrap; }
-  .links a { padding: 10px 20px; border-radius: 8px; text-decoration: none; font-size: 0.9rem; transition: all 0.2s; }
+  /* Links */
+  .links { display: flex; gap: 10px; justify-content: center; margin-top: 36px; flex-wrap: wrap; }
+  .links a { padding: 10px 18px; border-radius: 8px; text-decoration: none; font-size: 0.85rem; transition: all 0.2s; }
   .link-primary { background: #1D9E75; color: #fff; }
   .link-primary:hover { background: #17865f; }
   .link-secondary { background: #1e2630; color: #e0e0e0; border: 1px solid #2a3340; }
   .link-secondary:hover { background: #2a3340; }
 
-  .footer { text-align: center; margin-top: 48px; color: #555; font-size: 0.8rem; }
+  /* Footer */
+  .footer { text-align: center; margin-top: 40px; color: #555; font-size: 0.78rem; }
   .footer a { color: #1D9E75; text-decoration: none; }
 
-  @media (max-width: 500px) {
-    .hero h1 { font-size: 1.8rem; }
-    .stats { grid-template-columns: 1fr; }
+  /* ---- Mobile ---- */
+  @media (max-width: 600px) {
+    .container { padding: 24px 14px; }
+    .hero { margin-bottom: 28px; }
+    .hero h1 { font-size: 1.7rem; }
+    .hero p { font-size: 0.88rem; }
+    .hero-badges { gap: 8px; }
+    .badge { font-size: 0.75rem; padding: 5px 10px; }
+    .zone-select { font-size: 0.82rem; padding: 6px 10px; }
+    .card { padding: 18px 14px; }
+    .card h2 { font-size: 0.9rem; }
+    .summary-text { font-size: 0.88rem; }
+    .ask-row { flex-direction: column; }
+    .ask-btn { width: 100%; padding: 12px; }
+    .ask-input { font-size: 16px; } /* prevents iOS zoom on focus */
+    .stats { grid-template-columns: repeat(3, 1fr); gap: 8px; }
+    .stat { padding: 14px 8px; }
+    .stat-value { font-size: 1.1rem; }
+    .stat-label { font-size: 0.7rem; }
     .chart-container { height: 220px; }
+    .links { flex-direction: column; align-items: stretch; }
+    .links a { text-align: center; padding: 12px; font-size: 0.9rem; }
+    .footer { font-size: 0.72rem; }
+  }
+
+  /* ---- Tablet ---- */
+  @media (min-width: 601px) and (max-width: 900px) {
+    .hero h1 { font-size: 2rem; }
+    .stat-value { font-size: 1.25rem; }
   }
 </style>
 </head>
@@ -54,33 +100,34 @@
   <div class="hero">
     <h1>⚡ Strømpris Pipeline</h1>
     <p>Sanntids strømpriser, ML-prognose og AI-oppsummering for Norge</p>
-    <span class="badge">Live</span>
-    <span class="badge" id="accuracy-badge" style="display:none; background:rgba(99,153,34,0.15); color:#639922; border-color:rgba(99,153,34,0.3);"></span>
-    <select id="area" style="margin-top:16px; padding:8px 16px; background:#141a22; color:#e0e0e0; border:1px solid #2a3340; border-radius:8px; font-size:0.95rem; cursor:pointer; outline:none;">
-      <option value="NO1">NO1 – Østlandet</option>
-      <option value="NO2">NO2 – Sørlandet</option>
-      <option value="NO3">NO3 – Midt-Norge</option>
-      <option value="NO4">NO4 – Nord-Norge</option>
-      <option value="NO5">NO5 – Vestlandet</option>
-    </select>
+    <div class="hero-badges">
+      <span class="badge badge-live">Live</span>
+      <span class="badge badge-accuracy" id="accuracy-badge"></span>
+      <select class="zone-select" id="area">
+        <option value="NO1">NO1 – Østlandet</option>
+        <option value="NO2">NO2 – Sørlandet</option>
+        <option value="NO3">NO3 – Midt-Norge</option>
+        <option value="NO4">NO4 – Nord-Norge</option>
+        <option value="NO5">NO5 – Vestlandet</option>
+      </select>
+    </div>
   </div>
 
-  <div class="card" id="summary-card">
+  <div class="card">
     <h2>Dagens strømprisråd</h2>
     <div class="summary-text" id="summary"><span class="loading">Henter oppsummering...</span></div>
   </div>
 
-
-  <div class="card" id="ask-card">
+  <div class="card">
     <h2>Spør om strøm</h2>
-    <div style="display:flex; gap:8px;">
-      <input type="text" id="ask-input" placeholder="F.eks: Jeg glemte vifta på i 10 timer, hva koster det?" style="flex:1; padding:10px 14px; background:#0b0f14; color:#e0e0e0; border:1px solid #2a3340; border-radius:8px; font-size:0.95rem; outline:none;" />
-      <button id="ask-btn" onclick="askQuestion()" style="padding:10px 20px; background:#1D9E75; color:#fff; border:none; border-radius:8px; font-size:0.95rem; cursor:pointer; white-space:nowrap;">Spør</button>
+    <div class="ask-row">
+      <input type="text" class="ask-input" id="ask-input" placeholder="F.eks: Jeg glemte vifta på i 10 timer, hva koster det?" />
+      <button class="ask-btn" id="ask-btn" onclick="askQuestion()">Spør</button>
     </div>
-    <div id="ask-answer" style="margin-top:14px; color:#d0d0d0; line-height:1.7; display:none;"></div>
+    <div class="ask-answer" id="ask-answer"></div>
   </div>
 
-  <div class="stats" id="stats">
+  <div class="stats">
     <div class="stat"><div class="stat-value" id="stat-avg">-</div><div class="stat-label">Snitt i dag</div></div>
     <div class="stat"><div class="stat-value" id="stat-min">-</div><div class="stat-label">Lavest i dag</div></div>
     <div class="stat"><div class="stat-value" id="stat-max">-</div><div class="stat-label">Høyest i dag</div></div>
@@ -107,20 +154,20 @@
 </div>
 
 <script>
-const today = new Date().toISOString().slice(0, 10);
-
 let priceChart = null;
+const today = new Date().toISOString().slice(0, 10);
 
 function getArea() { return document.getElementById('area').value; }
 
 async function loadSummary() {
+  const el = document.getElementById('summary');
+  el.innerHTML = '<span class="loading">Henter oppsummering...</span>';
   try {
     const res = await fetch('/summary?area=' + getArea());
     const data = await res.json();
-    const el = document.getElementById('summary');
     el.innerHTML = data.summary.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/\n/g, '<br>');
   } catch (e) {
-    document.getElementById('summary').textContent = 'Kunne ikke hente oppsummering.';
+    el.textContent = 'Kunne ikke hente oppsummering.';
   }
 }
 
@@ -133,23 +180,23 @@ async function loadChart() {
     const prices = await pricesRes.json();
     const forecast = await forecastRes.json();
 
-    const toOslo = (iso) => new Date(iso).toLocaleTimeString('no-NO', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Oslo' });
-    const toOsloLabel = (iso) => new Date(iso).toLocaleString('no-NO', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Oslo' });
+    const toLabel = (iso) => new Date(iso).toLocaleString('no-NO', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Oslo' });
 
     const allLabels = [
-      ...prices.map(p => toOsloLabel(p.time_start)),
-      ...forecast.map(p => toOsloLabel(p.time_start))
+      ...prices.map(p => toLabel(p.time_start)),
+      ...forecast.map(p => toLabel(p.time_start))
     ];
 
     const actualData = prices.map(p => p.nok_per_kwh);
     const forecastData = new Array(prices.length).fill(null).concat(forecast.map(p => p.forecast_nok_per_kwh));
 
-    // Stats
     if (actualData.length > 0) {
       const avg = actualData.reduce((a, b) => a + b, 0) / actualData.length;
       document.getElementById('stat-avg').textContent = avg.toFixed(2) + ' kr';
       document.getElementById('stat-min').textContent = Math.min(...actualData).toFixed(2) + ' kr';
       document.getElementById('stat-max').textContent = Math.max(...actualData).toFixed(2) + ' kr';
+    } else {
+      ['stat-avg', 'stat-min', 'stat-max'].forEach(id => document.getElementById(id).textContent = '-');
     }
 
     if (priceChart) priceChart.destroy();
@@ -181,6 +228,19 @@ async function loadChart() {
   }
 }
 
+async function loadAccuracy() {
+  try {
+    const res = await fetch('/accuracy?area=' + getArea());
+    const data = await res.json();
+    const badge = document.getElementById('accuracy-badge');
+    if (data.accuracy_pct) {
+      badge.textContent = 'Treffsikkerhet: ' + data.accuracy_pct + '%';
+      badge.style.display = 'inline-flex';
+    } else {
+      badge.style.display = 'none';
+    }
+  } catch (e) {}
+}
 
 async function askQuestion() {
   const input = document.getElementById('ask-input');
@@ -208,19 +268,6 @@ async function askQuestion() {
 document.getElementById('ask-input').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') askQuestion();
 });
-
-
-async function loadAccuracy() {
-  try {
-    const res = await fetch('/accuracy?area=' + getArea());
-    const data = await res.json();
-    const badge = document.getElementById('accuracy-badge');
-    if (data.accuracy_pct) {
-      badge.textContent = 'Treffsikkerhet: ' + data.accuracy_pct + '%';
-      badge.style.display = 'inline-block';
-    }
-  } catch (e) {}
-}
 
 function loadAll() { loadSummary(); loadChart(); loadAccuracy(); }
 document.getElementById('area').addEventListener('change', loadAll);
