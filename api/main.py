@@ -211,14 +211,15 @@ def accuracy(area: str = "NO1", days: int = 7):
     errors = [float(r[3]) for r in rows]
     actuals = [float(r[2]) for r in rows]
     mae = sum(errors) / len(errors)
-    mape = sum(e / a for e, a in zip(errors, actuals) if a > 0) / len(errors) * 100
+    mean_price = sum(actuals) / len(actuals)
+    accuracy = (1 - mae / mean_price) * 100 if mean_price > 0 else 0
     return {
         "area": area,
         "days": days,
         "hours_compared": len(rows),
         "mae_kr_per_kwh": round(mae, 4),
         "mae_ore": round(mae * 100, 1),
-        "accuracy_pct": round(100 - mape, 1),
+        "accuracy_pct": round(accuracy, 1),
         "worst_miss_kr": round(max(errors), 4),
         "best_hit_kr": round(min(errors), 4),
     }
