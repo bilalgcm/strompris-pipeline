@@ -111,7 +111,7 @@ def fetch_forecast_temps():
 @app.get("/forecast")
 def forecast(area: str = "NO1"):
     rows = run_query(
-        "SELECT time_start, nok_per_kwh FROM prices WHERE price_area = %s ORDER BY time_start DESC LIMIT 200;",
+        "SELECT time_start, nok_per_kwh FROM prices WHERE price_area = %s AND time_start <= NOW() ORDER BY time_start DESC LIMIT 200;",
         (area,),
     )
     known_prices = {ts: float(p) for ts, p in rows}
