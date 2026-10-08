@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-A Norwegian electricity-price platform: ingest hourly spot prices (all five zones NO1–NO5) and Oslo weather, store ~4 years of history in PostgreSQL, forecast the next 24h with a scikit-learn model, and serve everything (plus LLM Q&A/advice in Norwegian) through a FastAPI app with a vanilla-JS landing page. Deployed on Fly.io against a Neon-managed Postgres.
+A Norwegian electricity-price platform: ingest hourly spot prices (all five zones NO1–NO5) and Oslo weather, store ~4 years of history in PostgreSQL, forecast the first day without published prices with a scikit-learn model, and serve everything (plus LLM Q&A/advice in Norwegian) through a FastAPI app with a vanilla-JS landing page. Deployed on Fly.io against a Neon-managed Postgres.
 
 ## Commands
 
@@ -36,7 +36,7 @@ ruff check .
 python -m pytest -q
 ```
 
-CI (`.github/workflows/ci.yml`) runs `ruff check .`, `pytest`, then a Docker build on every push/PR to `main`. Tests live in `tests/` and cover the pure logic (`api/freshness.py`, `api/refresh.py`, `ingest/quality.py`); they need no database, model or API key.
+CI (`.github/workflows/ci.yml`) runs `ruff check .`, `pytest`, then a Docker build on every push/PR to `main`. Tests live in `tests/` and cover the pure logic (`api/freshness.py`, `api/refresh.py`, `api/forecasting.py`, `api/prompts.py`, `ingest/quality.py`); they need no database, model or API key.
 
 ## Working directory matters
 
@@ -64,7 +64,7 @@ Connection comes from env, with a local fallback baked into every module:
 
 is **duplicated** in `model/save_model.py`, `model/train.py`, and `api/main.py` — keep all three in sync when changing features. Features are built two different ways that must agree:
 - **Training** (`model/features.py`): a SQL join of `prices` + `weather` on `time_start`, then pandas lag/calendar columns, converting UTC → `Europe/Oslo` for calendar fields.
-- **Serving** (`api/main.py::forecast`): reconstructs the same 8 features per future hour in Python, pulling recent prices/temps from the DB and future temps live from Open-Meteo.
+- **Serving** (`api/main.py::_compute_forecast` + `api/forecasting.py`): reconstructs the same 8 features per future hour in Python, pulling recent prices/temps from the DB and future temps live from Open-Meteo. The forecast window starts after the newest stored price and runs to the end of the next Oslo day (`forecast_hours`), so it never covers hours whose real price is already published: before ~13:00 that is tomorrow, after publication the day after tomorrow.
 
 The model is **trained on NO1 only** but served for every zone via `?area=NO1..NO5`. The train/test split cutoff lives in `model/baseline.py` (`CUTOFF`).
 
@@ -86,3 +86,4 @@ Push to `main` → `.github/workflows/fly-deploy.yml` runs `flyctl deploy --remo
 
 - Lint rules and intentional ignores are in `ruff.toml` (e.g. `DTZ011` because the app only ever runs in one timezone, `B008` for FastAPI `Query()` defaults).
 - Timestamps are stored and compared in UTC; convert to `Europe/Oslo` only for display and calendar features.
+- Never use `date.today()` (UTC on Fly) or pass plain dates to SQL (compared against UTC midnight). Use `oslo_today()` and `oslo_midnight()` from `api/forecasting.py`.
