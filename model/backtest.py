@@ -9,9 +9,9 @@ site uses Open-Meteo's forecast.
 Compared side by side:
     naive_24h     same price as the same hour yesterday
     naive_168h    same price as the same hour last week
-    model_no1     today's setup: one model trained on NO1, used for every area
-    model_zone    one model per area, trained on that area's own history
-    model_v2      like model_no1, plus a summary of the previous day (candidate for 7b)
+    model_no1     the old live setup (until Oct 2026): 8 features, trained on NO1, used everywhere
+    model_v2      the live setup since Oct 2026: plus a summary of the previous day, trained on NO1
+    model_v2_zone the candidate: same features as model_v2, but one model per area
 
 Usage (from the repo root, after `python model/export_data.py`):
     python model/backtest.py            # last 12 months
@@ -32,7 +32,7 @@ FEATURES = ["hour", "dayofweek", "month", "is_weekend", "lag_24h", "lag_168h", "
 # Candidate for 7b: the same plus a summary of the previous day (see features.add_previous_day)
 FEATURES_V2 = FEATURES + ["prev_day_mean", "prev_day_min", "prev_day_max", "prev_day_last"]
 AREAS = ["NO1", "NO2", "NO3", "NO4", "NO5"]
-METHODS = ["naive_24h", "naive_168h", "model_no1", "model_zone", "model_v2"]
+METHODS = ["naive_24h", "naive_168h", "model_no1", "model_v2", "model_v2_zone"]
 EVENING_DROP = 0.30  # previous day's 23:00 price at least 30 % below its daily mean
 MIN_TRAIN_HOURS = 24 * 90  # don't train a per-area model on less than ~3 months of history
 
@@ -113,7 +113,8 @@ def run(prices: pd.DataFrame, weather: pd.DataFrame, n_months: int) -> pd.DataFr
             test["model_no1"] = model_no1.predict(test[FEATURES])
             test["model_v2"] = model_v2.predict(test[FEATURES_V2])
             # For NO1 the per-zone model is the same model, so reuse its forecast
-            test["model_zone"] = test["model_no1"] if area == "NO1" else fit(train).predict(test[FEATURES])
+            test["model_v2_zone"] = (test["model_v2"] if area == "NO1"
+                                     else fit(train, FEATURES_V2).predict(test[FEATURES_V2]))
             results.append(test)
         print(f"  {start:%Y-%m} ferdig")
 

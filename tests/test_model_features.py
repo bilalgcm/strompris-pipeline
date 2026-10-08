@@ -63,8 +63,8 @@ def test_evening_drop_flags_the_next_day():
 def test_mae_table_in_ore():
     results = pd.DataFrame({
         "area": ["NO1", "NO1"], "price": [1.0, 2.0],
-        "naive_24h": [1.1, 1.8], "naive_168h": [1.0, 2.0], "model_no1": [0.9, 2.3], "model_zone": [1.0, 2.1],
-        "model_v2": [1.0, 2.0],
+        "naive_24h": [1.1, 1.8], "naive_168h": [1.0, 2.0], "model_no1": [0.9, 2.3], "model_v2": [1.0, 2.1],
+        "model_v2_zone": [1.0, 2.0],
     })
     table = mae_table(results, "area")
     assert table.loc["NO1"].tolist() == pytest.approx([15.0, 0.0, 20.0, 5.0, 0.0])
