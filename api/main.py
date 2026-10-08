@@ -78,9 +78,44 @@ def cached(cache, area, compute):
     return value
 
 
+AREAS = ["NO1", "NO2", "NO3", "NO4", "NO5"]
+
+
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    """Report data freshness. Always HTTP 200; status lives in the body so Fly
+    autostart / uptime monitors never flap. status is one of ok | stale | error."""
+    now = datetime.now(OSLO)
+    try:
+        price_rows = run_query(
+            "SELECT price_area, max(time_start) FROM prices GROUP BY price_area;", ()
+        )
+        latest_price = {area: ts for area, ts in price_rows}
+        forecast_rows = run_query("SELECT max(time_start) FROM forecasts;", ())
+        latest_forecast = forecast_rows[0][0] if forecast_rows else None
+    except Exception as e:
+        return {"status": "error", "detail": f"{type(e).__name__}: {e}", "checked_at": now.isoformat()}
+
+    # Tomorrow's day-ahead prices publish ~13:00 CET; if they're still missing
+    # for any area after 15:00 Oslo, the nightly pipeline is behind -> stale.
+    tomorrow_start = datetime.combine(now.date() + timedelta(days=1), datetime.min.time(), tzinfo=OSLO)
+    status = "ok"
+    if now.hour >= 15:
+        for area in AREAS:
+            latest = latest_price.get(area)
+            if latest is None or latest.astimezone(OSLO) < tomorrow_start:
+                status = "stale"
+                break
+
+    return {
+        "status": status,
+        "latest_price": {
+            area: (latest_price[area].isoformat() if latest_price.get(area) else None)
+            for area in AREAS
+        },
+        "latest_forecast": latest_forecast.isoformat() if latest_forecast else None,
+        "checked_at": now.isoformat(),
+    }
 
 
 @app.get("/prices")
