@@ -1,10 +1,18 @@
 """Hand-calculated checks for spot vs. Norgespris over a month."""
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from api.comparison import Hour, compare, spread_monthly_kwh
+from api.comparison import (
+    Hour,
+    compare,
+    complete_months,
+    hours_in_month,
+    month_bounds,
+    spread_monthly_kwh,
+)
+from api.costs import markup_from_invoice
 from api.freshness import OSLO
 
 T0 = datetime(2026, 9, 1, 0, tzinfo=OSLO)
@@ -86,3 +94,35 @@ def test_weighted_average_matches_invoice_style():
 def test_zero_consumption():
     r = compare([], "NO1")
     assert r["kwh"] == 0 and r["avg_spot_excl_vat"] is None
+
+
+# --- months ----------------------------------------------------------------
+
+
+
+
+def test_month_bounds_in_utc():
+    start, end = month_bounds("2026-09")
+    assert start == datetime(2026, 8, 31, 22, tzinfo=UTC)  # 1 Sept 00:00 Oslo
+    assert end == datetime(2026, 9, 30, 22, tzinfo=UTC)
+
+
+def test_december_rolls_over_to_next_year():
+    _, end = month_bounds("2026-12")
+    assert end == datetime(2026, 12, 31, 23, tzinfo=UTC)  # 1 Jan 2027 00:00 Oslo (winter time)
+
+
+@pytest.mark.parametrize("month, hours", [("2026-09", 720), ("2026-01", 744), ("2026-03", 743), ("2026-10", 745)])
+def test_hours_in_month_including_dst(month, hours):
+    assert hours_in_month(month) == hours
+
+
+def test_complete_months_newest_first():
+    counts = {"2026-08": 744, "2026-09": 720, "2026-10": 190, "2026-07": 700}
+    assert complete_months(counts) == ["2026-09", "2026-08"]
+
+
+def test_markup_from_invoice():
+    # Telemark Kraft: 3.9 oere incl. VAT = 0.0312 kr excl. VAT. In NO4 there is no VAT.
+    assert markup_from_invoice(3.9, "NO1") == pytest.approx(0.0312)
+    assert markup_from_invoice(3.9, "NO4") == pytest.approx(0.039)

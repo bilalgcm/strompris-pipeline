@@ -73,6 +73,14 @@ def vat_factor(area: str) -> float:
     return 1.0 if area in NO_VAT_AREAS else 1 + VAT_RATE
 
 
+def markup_from_invoice(ore_incl_vat: float, area: str) -> float:
+    """Convert a supplier markup as invoices show it (oere/kWh incl. VAT) to kr/kWh excl. VAT.
+
+    Example: Telemark Kraft's 3.9 oere incl. VAT is 0.0312 kr excl. VAT in NO1.
+    """
+    return ore_incl_vat / 100 / vat_factor(area)
+
+
 def is_day_rate(ts: datetime) -> bool:
     """True if Elvia's day rate applies: a weekday that isn't a holiday, 06:00-22:00 Oslo time."""
     local = ts.astimezone(OSLO)

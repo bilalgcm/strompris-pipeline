@@ -10,9 +10,10 @@ The cap is applied in time order, so it is the last hours of a big month that fa
 """
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 
 from api.costs import MONTHLY_CAP_KWH, NORGESPRIS, support_per_kwh, vat_factor
+from api.forecasting import oslo_midnight
 
 
 @dataclass(frozen=True)
@@ -20,6 +21,24 @@ class Hour:
     time_start: datetime
     kwh: float
     spot: float  # kr/kWh excl. VAT
+
+
+def month_bounds(month: str) -> tuple[datetime, datetime]:
+    """Start and end of an Oslo calendar month ("2026-09"), as UTC datetimes."""
+    first = date.fromisoformat(month + "-01")
+    nxt = date(first.year + (first.month == 12), first.month % 12 + 1, 1)
+    return oslo_midnight(first), oslo_midnight(nxt)
+
+
+def hours_in_month(month: str) -> int:
+    """743 in March and 745 in October because of DST, otherwise days * 24."""
+    start, end = month_bounds(month)
+    return int((end - start).total_seconds() // 3600)
+
+
+def complete_months(hours_per_month: dict[str, int]) -> list[str]:
+    """Months where every hour has data, newest first. Input: {"2026-09": 720, ...}."""
+    return sorted((m for m, n in hours_per_month.items() if n == hours_in_month(m)), reverse=True)
 
 
 def spread_monthly_kwh(total_kwh: float, profile: list[tuple[datetime, float]]) -> list[tuple[datetime, float]]:
