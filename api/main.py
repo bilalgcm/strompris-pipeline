@@ -1,5 +1,5 @@
 import os
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -25,16 +25,12 @@ LLM = anthropic.Anthropic()
 
 LANDING_HTML = Path("api/landing.html").read_text()
 
-LANDING_HTML = Path("api/landing.html").read_text()
-
 app = FastAPI(title="Strompris API")
 
 
 @app.get("/", response_class=HTMLResponse)
 def landing():
     return LANDING_HTML
-
-
 
 
 def run_query(sql, params):
@@ -98,9 +94,8 @@ def fetch_forecast_temps():
         })
         resp.raise_for_status()
         data = resp.json()
-        from datetime import datetime as dt_cls
         return {
-            dt_cls.fromisoformat(t).replace(tzinfo=OSLO.tzinfo if False else __import__("datetime").timezone.utc): temp
+            datetime.fromisoformat(t).replace(tzinfo=timezone.utc): temp
             for t, temp in zip(data["hourly"]["time"], data["hourly"]["temperature_2m"])
             if temp is not None
         }
@@ -149,7 +144,6 @@ def forecast(area: str = "NO1"):
         {"time_start": t.isoformat(), "forecast_nok_per_kwh": round(float(p), 4)}
         for t, p in zip(times, preds)
     ]
-
 
 
 @app.get("/ask")
