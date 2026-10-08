@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 import threading
@@ -27,7 +28,10 @@ from api.comparison import (
 from api.costs import Nettleie, markup_from_invoice, norgespris_cost, spot_cost
 from api.forecasting import (
     FEATURES,
+    KINDS,
+    OFFSETS_PATH,
     build_feature_rows,
+    calibrated_interval,
     forecast_hours,
     model_path,
     oslo_midnight,
@@ -46,8 +50,9 @@ DB_CONN = os.environ.get(
 OSLO = ZoneInfo("Europe/Oslo")
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("strompris")
-# Every model file is loaded once at startup; model_path() picks one per area.
-MODELS = {path: joblib.load(path) for path in {model_path(a) for a in AREAS}}
+# Every model file is loaded once at startup; model_path() picks one per area and kind.
+MODELS = {path: joblib.load(path) for path in {model_path(a, k) for a in AREAS for k in KINDS}}
+INTERVAL_OFFSETS = json.loads(Path(OFFSETS_PATH).read_text())
 LLM = anthropic.Anthropic()
 
 LANDING_HTML = Path("api/landing.html").read_text()
@@ -344,11 +349,18 @@ def _compute_forecast(area):
 
     hours = forecast_hours(latest)
     features = pd.DataFrame(build_feature_rows(hours, known_prices, known_temps), dtype=float)
-    preds = MODELS[model_path(area)].predict(features[FEATURES])
-    return [
-        {"time_start": t.isoformat(), "forecast_nok_per_kwh": round(float(p), 4)}
-        for t, p in zip(hours, preds)
-    ]
+    preds = {kind: MODELS[model_path(area, kind)].predict(features[FEATURES]) for kind in KINDS}
+    result = []
+    for i, t in enumerate(hours):
+        point = float(preds["mean"][i])
+        low, high = calibrated_interval(point, float(preds["low"][i]), float(preds["high"][i]), INTERVAL_OFFSETS[area])
+        result.append({
+            "time_start": t.isoformat(),
+            "forecast_nok_per_kwh": round(point, 4),
+            "low_nok_per_kwh": round(low, 4),    # 80 % prediction interval
+            "high_nok_per_kwh": round(high, 4),
+        })
+    return result
 
 
 @app.get("/ask")

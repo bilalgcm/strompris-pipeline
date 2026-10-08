@@ -21,12 +21,46 @@ MIN_HOURS_PER_DAY = 23  # same rule as model/features.py: fewer hours = incomple
 # NO2: 17.2 vs 18.2 oere, NO4: 14.6 vs 16.9. (NO3 was 15 % worse with its own model.)
 # Must match model/save_model.py ZONE_MODELS (checked by tests/test_model_artifact.py).
 ZONE_MODELS = ("NO2", "NO4")
-SHARED_MODEL = "model/model.joblib"
+
+# Each model comes in three kinds: the forecast itself ("mean") and the 10th and 90th
+# percentile ("low", "high"), which give an 80 % prediction interval. See model/backtest.py.
+KINDS = ("mean", "low", "high")
 
 
-def model_path(area: str) -> str:
-    """Which model file serves an area: its own if it has one, otherwise the shared model."""
-    return f"model/model_{area}.joblib" if area in ZONE_MODELS else SHARED_MODEL
+def model_path(area: str, kind: str = "mean") -> str:
+    """Which model file serves an area: its own if it has one, otherwise the shared model.
+
+    model/model.joblib, model/model_low.joblib, model/model_NO2.joblib, model/model_NO2_high.joblib, ...
+    """
+    name = "model" + (f"_{area}" if area in ZONE_MODELS else "") + ("" if kind == "mean" else f"_{kind}")
+    return f"model/{name}.joblib"
+
+
+OFFSETS_PATH = "model/interval_offsets.json"  # written by model/save_model.py
+
+
+def calibrated_interval(point: float, low: float, high: float, offset: float) -> tuple[float, float]:
+    """Widen the raw quantile band by the area's calibration offset, then order it.
+
+    Raw quantile models covered only ~70 % in the backtest; the offset (split conformal
+    prediction, measured on the last 3 months) brings the band back to ~80 %.
+    A negative offset narrows the band; if it would narrow past zero width, the band
+    collapses to the forecast instead of flipping inside out.
+    """
+    low, high = min(low, high) - offset, max(low, high) + offset
+    if low > high:
+        low = high = point
+    return ordered_interval(point, low, high)
+
+
+def ordered_interval(point: float, low: float, high: float) -> tuple[float, float]:
+    """Make sure low <= point <= high.
+
+    Three separately trained models can disagree slightly: the low model can come out above
+    the high one, or the forecast can fall just outside the band. The band is widened to
+    contain all three rather than showing something impossible.
+    """
+    return min(point, low, high), max(point, low, high)
 
 
 def oslo_today(now: datetime | None = None) -> date:

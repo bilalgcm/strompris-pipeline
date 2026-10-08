@@ -6,7 +6,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY api/ api/
-COPY model/*.joblib model/
+COPY model/*.joblib model/interval_offsets.json model/
 
 EXPOSE 8000
 

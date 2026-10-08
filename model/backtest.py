@@ -30,6 +30,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 from features import add_features
+from intervals import CAL_MONTHS, Q_HIGH, Q_LOW, conformal_offset
 from save_model import ZONE_MODELS
 from sklearn.ensemble import HistGradientBoostingRegressor
 
@@ -40,9 +41,6 @@ FEATURES_V2 = FEATURES + ["prev_day_mean", "prev_day_min", "prev_day_max", "prev
 AREAS = ["NO1", "NO2", "NO3", "NO4", "NO5"]
 METHODS = ["naive_24h", "naive_168h", "model_no1", "model_v2", "model_v2_zone"]
 EVENING_DROP = 0.30  # previous day's 23:00 price at least 30 % below its daily mean
-Q_LOW, Q_HIGH = 0.10, 0.90  # 80 % prediction interval
-TARGET_COVERAGE = Q_HIGH - Q_LOW
-CAL_MONTHS = 3  # calibration window right before each test month (split conformal prediction)
 MIN_TRAIN_HOURS = 24 * 90  # don't train a per-area model on less than ~3 months of history
 
 
@@ -101,18 +99,6 @@ def pinball(y: pd.Series, f: pd.Series, q: float) -> float:
     """Standard score for a quantile forecast (lower is better), in oere/kWh."""
     diff = y - f
     return float(np.maximum(q * diff, (q - 1) * diff).mean() * 100)
-
-
-def conformal_offset(y: pd.Series, low: pd.Series, high: pd.Series, coverage: float = TARGET_COVERAGE) -> float:
-    """How much to widen [low, high] so it would have covered `coverage` of y (split conformal / CQR).
-
-    Score per hour = how far the real price fell outside the band (negative if inside).
-    The offset is that score's (n+1)*coverage-th smallest value. A negative offset narrows the band.
-    """
-    scores = np.sort(np.maximum(low - y, y - high).to_numpy())
-    n = len(scores)
-    k = min(n, int(np.ceil((n + 1) * coverage)))
-    return float(scores[k - 1])
 
 
 def interval_table(results: pd.DataFrame, by: str, low: str = "low", high: str = "high") -> pd.DataFrame:

@@ -4,7 +4,6 @@ import numpy as np
 import pandas as pd
 import pytest
 from backtest import (
-    conformal_offset,
     data_coverage,
     interval_table,
     last_complete_months,
@@ -13,6 +12,7 @@ from backtest import (
     pinball,
 )
 from features import add_features, add_previous_day
+from intervals import conformal_offset
 
 
 def hourly(start, prices, tz="UTC"):

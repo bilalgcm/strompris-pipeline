@@ -30,7 +30,7 @@ python db/migrate.py up 001                # and: down 001
 # so the flat imports work, and save_model.py's relative path model/model.joblib resolves correctly)
 python model/baseline.py                   # print naive-baseline MAE the model must beat
 python model/train.py                      # compare baseline vs with/without weather (eval only, no save)
-python model/save_model.py                 # retrain shared (NO1) + NO2 + NO4 models, writes model/*.joblib
+python model/save_model.py                 # retrain shared (NO1) + NO2 + NO4 as mean/low/high (9 files) + interval_offsets.json
 python model/export_data.py                # read-only export of prices + weather to model/data/*.parquet (gitignored)
 python model/backtest.py [months]          # monthly walk-forward backtest, all zones, from the exported files
 
@@ -70,9 +70,11 @@ Original tables:
 
 `HistGradientBoostingRegressor` predicting `nok_per_kwh`, with 12 features: calendar (`hour`, `dayofweek`, `month`, `is_weekend`), lags (`lag_24h`, `lag_168h`), weather (`temperature`, `temp_24h`) and a summary of the previous Oslo day (`prev_day_mean/min/max/last`, added Oct 2026 after the backtest: NO1 MAE 15.7 vs 17.9 oere, and the bias after sharp evening price drops roughly halved).
 
+**Prediction intervals:** every model comes in three kinds (`api/forecasting.py::KINDS`): the forecast (`mean`) and the 10th and 90th percentile (`low`, `high`, trained with `loss="quantile"`), giving an 80 % interval. Files: `model/model.joblib`, `model/model_low.joblib`, `model/model_high.joblib`, `model/model_NO2.joblib`, `model/model_NO2_low.joblib`, and so on (9 files). `/forecast` returns `low_nok_per_kwh` / `high_nok_per_kwh`, ordered so that low <= forecast <= high (`ordered_interval`). Raw quantile models covered only ~70 % in the backtest, so the band is **calibrated** (split conformal prediction, `model/intervals.py::conformal_offset`): `save_model.py` trains low/high models on data up to 3 months before the newest hour, measures per area how far outside the band real prices fell in those 3 months, and writes the margin to `model/interval_offsets.json`; the API widens (or narrows) the band by it (`calibrated_interval`). The backtest reports raw and calibrated coverage (should be near 80 %), width and pinball loss.
+
 **Per-zone models (since Oct 2026):** NO2 and NO4 have their own models (`model/model_NO2.joblib`, `model/model_NO4.joblib`), trained on their own history; NO1, NO3 and NO5 use the shared NO1-trained `model/model.joblib`. Chosen by the backtest with a rule fixed beforehand (own model only if 5 %+ better over 12 months). `api/forecasting.py::model_path` routes areas to files; `ZONE_MODELS` is defined there and in `model/save_model.py`, which trains all three models in one run.
 
-The list lives in `api/forecasting.py::FEATURES` and `model/save_model.py::FEATURES`. `tests/test_model_artifact.py` checks that the two match (and that both agree on `ZONE_MODELS`), that **every** model file exists and was trained on exactly those names, and that serving computes the same values as training (including across DST). **Changing features or zones means retraining (`python model/save_model.py`) and committing all `model/*.joblib` files in the same push**, or CI fails. Features are built two ways that must agree:
+The list lives in `api/forecasting.py::FEATURES` and `model/save_model.py::FEATURES`. `tests/test_model_artifact.py` checks that the two match (and that both agree on `ZONE_MODELS`), that **every** model file exists and was trained on exactly those names, and that serving computes the same values as training (including across DST). **Changing features or zones means retraining (`python model/save_model.py`) and committing all `model/*.joblib` files and `model/interval_offsets.json` in the same push**, or CI fails. Features are built two ways that must agree:
 - **Training** (`model/features.py`): `add_features` (pure, used by training and the backtest) joins prices and weather on `time_start`, adds calendar fields in `Europe/Oslo`, and looks lags up **by timestamp** (t - 24h, t - 168h), so gaps in the data can't shift them. It also adds `prev_day_mean/min/max/last` (summary of the previous Oslo day, NaN if that day has fewer than 23 hours).
 - **Serving** (`api/main.py::_compute_forecast` + `api/forecasting.py`): reconstructs the same 12 features per future hour in Python, pulling recent prices/temps from the DB and future temps live from Open-Meteo. The forecast window starts after the newest stored price and runs to the end of the next Oslo day (`forecast_hours`), so it never covers hours whose real price is already published: before ~13:00 that is tomorrow, after publication the day after tomorrow.
 
@@ -86,7 +88,7 @@ GitHub runs scheduled workflows best effort (often hours late, sometimes skipped
 
 ## Deployment
 
-Push to `main` → `.github/workflows/fly-deploy.yml` runs `flyctl deploy --remote-only`. The `Dockerfile` ships **only** `api/` + `model/*.joblib` and the installed deps — ingestion and training code are intentionally not in the image. The one exception is the small self-healing fetch in `api/refresh.py`, which duplicates the URL and upsert from `ingest/` on purpose to keep that boundary. The model files are force-tracked in git via `.gitignore` negations (`!model/model.joblib`, `!model/model_NO*.joblib`) despite the global `*.joblib` ignore; commit freshly trained models to ship them.
+Push to `main` → `.github/workflows/fly-deploy.yml` runs `flyctl deploy --remote-only`. The `Dockerfile` ships **only** `api/` + `model/*.joblib` + `model/interval_offsets.json` and the installed deps — ingestion and training code are intentionally not in the image. The one exception is the small self-healing fetch in `api/refresh.py`, which duplicates the URL and upsert from `ingest/` on purpose to keep that boundary. The model files are force-tracked in git via `.gitignore` negations (`!model/model.joblib`, `!model/model_*.joblib`) despite the global `*.joblib` ignore; commit freshly trained models to ship them.
 
 ## Household cost (`/cost`)
 

@@ -66,7 +66,10 @@ def format_prices(prices: list[dict], key: str) -> str:
     lines = []
     for p in prices:
         ts = datetime.fromisoformat(p["time_start"]).astimezone(OSLO)
-        lines.append(f"  kl {ts.strftime('%H:%M')}: {p[key]:.2f} kr/kWh")
+        line = f"  kl {ts.strftime('%H:%M')}: {p[key]:.2f} kr/kWh"
+        if "low_nok_per_kwh" in p:  # forecasts carry an 80 % interval
+            line += f" (80 % sannsynlig mellom {p['low_nok_per_kwh']:.2f} og {p['high_nok_per_kwh']:.2f})"
+        lines.append(line)
     return "\n".join(lines)
 
 

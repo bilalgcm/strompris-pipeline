@@ -3,5 +3,5 @@ __pycache__/
 *.joblib
 .env
 !model/model.joblib
-!model/model_NO*.joblib
+!model/model_*.joblib
 model/data/

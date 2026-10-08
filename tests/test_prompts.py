@@ -89,3 +89,10 @@ def test_price_facts_with_and_without_tomorrow():
                        real_today + hourly(tomorrow, [0.8] * 24))
     assert "- I morgen (fredag 9.10.)" in both
     assert "ikke publisert" not in both
+
+
+def test_forecast_lines_show_the_interval():
+    forecast = [{"time_start": "2026-10-10T00:00:00+02:00", "forecast_nok_per_kwh": 0.95,
+                 "low_nok_per_kwh": 0.8, "high_nok_per_kwh": 1.15}]
+    text = price_context(TODAY, prices_for(TODAY), forecast)
+    assert "kl 00:00: 0.95 kr/kWh (80 % sannsynlig mellom 0.80 og 1.15)" in text

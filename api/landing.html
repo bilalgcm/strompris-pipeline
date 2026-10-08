@@ -277,6 +277,10 @@ async function loadChart() {
 
     const actualData = prices.map(p => p.nok_per_kwh);
     const forecastData = new Array(prices.length).fill(null).concat(forecast.map(p => p.forecast_nok_per_kwh));
+    // 80 % prediction interval, drawn as a shaded band between two invisible lines
+    const pad = new Array(prices.length).fill(null);
+    const lowData = pad.concat(forecast.map(p => p.low_nok_per_kwh ?? null));
+    const highData = pad.concat(forecast.map(p => p.high_nok_per_kwh ?? null));
 
     // Name the forecast day(s), e.g. "Prognose for lørdag 10. oktober"
     const dayName = (iso) => new Date(iso).toLocaleDateString('nb-NO', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'Europe/Oslo' });
@@ -300,20 +304,35 @@ async function loadChart() {
       data: {
         labels: allLabels,
         datasets: [
-          { label: 'Faktisk', data: actualData.concat(new Array(forecast.length).fill(null)), borderColor: '#1D9E75', backgroundColor: 'rgba(29,158,117,0.1)', fill: true, tension: 0.3, pointRadius: 0 },
-          { label: forecastLabel, data: forecastData, borderColor: '#D85A30', borderDash: [6, 3], backgroundColor: 'rgba(216,90,48,0.1)', fill: true, tension: 0.3, pointRadius: 0 }
+          { label: 'Faktisk', pointStyle: 'line', data: actualData.concat(new Array(forecast.length).fill(null)), borderColor: '#1D9E75', backgroundColor: 'rgba(29,158,117,0.1)', fill: true, tension: 0.3, pointRadius: 0 },
+          { label: forecastLabel, pointStyle: 'line', data: forecastData, borderColor: '#D85A30', borderDash: [6, 3], backgroundColor: 'rgba(216,90,48,0.1)', fill: false, tension: 0.3, pointRadius: 0 },
+          { label: 'band-low', data: lowData, borderWidth: 0, pointRadius: 0, tension: 0.3, fill: false },
+          { label: '80 % sannsynlig', pointStyle: 'rect', borderColor: 'rgba(216,90,48,0.35)', data: highData, borderWidth: 0, pointRadius: 0, tension: 0.3, fill: '-1', backgroundColor: 'rgba(216,90,48,0.18)' }
         ]
       },
       options: {
         responsive: true,
         maintainAspectRatio: false,
         plugins: {
-          legend: { labels: { color: '#8a8f98', usePointStyle: true, pointStyle: 'line' } },
-          tooltip: { mode: 'index', intersect: false, callbacks: { label: (c) => c.parsed.y !== null ? c.dataset.label + ': ' + c.parsed.y.toFixed(3) + ' kr/kWh' : null } }
+          legend: { labels: { color: '#8a8f98', usePointStyle: true, filter: (item) => item.text !== 'band-low' } },
+          tooltip: {
+            mode: 'index', intersect: false,
+            // Hide the two band lines and put the range on the forecast's own line instead
+            filter: (item) => item.datasetIndex < 2,
+            callbacks: {
+              label: (c) => {
+                if (c.parsed.y === null) return null;
+                let text = c.dataset.label + ': ' + kr(c.parsed.y) + ' kr/kWh';
+                const lo = lowData[c.dataIndex], hi = highData[c.dataIndex];
+                if (c.datasetIndex === 1 && lo !== null && hi !== null) text += ' (80 % sannsynlig ' + kr(lo) + '–' + kr(hi) + ')';
+                return text;
+              }
+            }
+          }
         },
         scales: {
           x: { ticks: { color: '#555', maxTicksLimit: 8, maxRotation: 0 }, grid: { color: 'rgba(255,255,255,0.05)' } },
-          y: { ticks: { color: '#555', callback: (v) => v.toFixed(2) }, grid: { color: 'rgba(255,255,255,0.05)' }, title: { display: true, text: 'kr/kWh', color: '#555' } }
+          y: { ticks: { color: '#555', callback: (v) => kr(v) }, grid: { color: 'rgba(255,255,255,0.05)' }, title: { display: true, text: 'kr/kWh', color: '#555' } }
         },
         interaction: { mode: 'nearest', axis: 'x' }
       }

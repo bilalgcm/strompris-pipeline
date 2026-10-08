@@ -4,6 +4,7 @@ If api/forecasting.py FEATURES changes without retraining, the live /forecast wo
 with a feature mismatch. These tests make CI fail first instead.
 """
 
+import json
 from pathlib import Path
 
 import joblib
@@ -13,7 +14,16 @@ import pytest
 import save_model
 from features import add_features
 
-from api.forecasting import FEATURES, ZONE_MODELS, build_feature_rows, model_path
+from api.forecasting import (
+    FEATURES,
+    KINDS,
+    OFFSETS_PATH,
+    ZONE_MODELS,
+    build_feature_rows,
+    calibrated_interval,
+    model_path,
+    ordered_interval,
+)
 
 ROOT = Path(__file__).resolve().parent.parent
 ALL_AREAS = ["NO1", "NO2", "NO3", "NO4", "NO5"]
@@ -27,11 +37,16 @@ def test_training_and_serving_agree_on_which_areas_have_their_own_model():
     assert tuple(save_model.ZONE_MODELS) == ZONE_MODELS
 
 
+def test_training_and_serving_agree_on_model_kinds():
+    assert tuple(save_model.KINDS) == KINDS
+
+
 @pytest.mark.parametrize("area", ALL_AREAS)
-def test_training_and_serving_agree_on_model_files(area):
+@pytest.mark.parametrize("kind", KINDS)
+def test_training_and_serving_agree_on_model_files(area, kind):
     # save_model only writes files for the shared area and ZONE_MODELS; every area must map to one of them
-    trained = {save_model.model_path(a) for a in (save_model.SHARED_AREA, *save_model.ZONE_MODELS)}
-    assert model_path(area) in trained
+    trained = {save_model.model_path(a, k) for a in (save_model.SHARED_AREA, *save_model.ZONE_MODELS) for k in KINDS}
+    assert model_path(area, kind) in trained
 
 
 def test_model_routing():
@@ -40,9 +55,18 @@ def test_model_routing():
     assert model_path("NO3") == "model/model.joblib"
     assert model_path("NO4") == "model/model_NO4.joblib"
     assert model_path("NO5") == "model/model.joblib"
+    assert model_path("NO1", "low") == "model/model_low.joblib"
+    assert model_path("NO4", "high") == "model/model_NO4_high.joblib"
+    assert model_path("NO5", "high") == "model/model_high.joblib"
 
 
-@pytest.mark.parametrize("path", sorted({model_path(a) for a in ALL_AREAS}))
+def test_ordered_interval():
+    assert ordered_interval(1.0, 0.8, 1.2) == (0.8, 1.2)
+    assert ordered_interval(1.0, 1.2, 0.8) == (0.8, 1.2)   # low and high swapped
+    assert ordered_interval(1.3, 0.8, 1.2) == (0.8, 1.3)   # forecast above the band: widen it
+
+
+@pytest.mark.parametrize("path", sorted({model_path(a, k) for a in ALL_AREAS for k in KINDS}))
 def test_every_saved_model_exists_and_uses_these_features(path):
     model = joblib.load(ROOT / path)
     assert list(model.feature_names_in_) == FEATURES
@@ -65,3 +89,17 @@ def test_serving_computes_the_same_features_as_training(start):
     for ts, row in zip(last_day, served, strict=True):
         for name in FEATURES:
             assert row[name] == pytest.approx(trained.loc[ts, name]), f"{name} differs at {ts}"
+
+
+def test_calibrated_interval():
+    # Raw band 0.8-1.2 widened by 0.1 on each side
+    assert calibrated_interval(1.0, 0.8, 1.2, 0.1) == pytest.approx((0.7, 1.3))
+    # A negative offset narrows it, but never so far that the forecast falls outside
+    assert calibrated_interval(1.0, 0.8, 1.2, -0.3) == pytest.approx((1.0, 1.0))
+
+
+def test_calibration_offsets_are_saved_for_every_area():
+    assert save_model.OFFSETS_PATH == OFFSETS_PATH
+    offsets = json.loads((ROOT / OFFSETS_PATH).read_text())
+    assert set(offsets) == set(ALL_AREAS)
+    assert all(abs(v) < 1.0 for v in offsets.values())  # kr/kWh; anything near 1 kr would be a bug
