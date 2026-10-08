@@ -24,7 +24,8 @@ cd ingest && python fetch_household.py     # Elhub household consumption, last 1
 cd ingest && python profile_check.py NO1 2026-09 1.32   # household profile vs. an invoice's average spot price
 
 # Migrations (from repo ROOT, uses DATABASE_URL)
-python db/migrate.py up 001                # and: down 001
+python db/migrate.py up 000                # base tables: prices, weather, forecasts (down refuses on purpose)
+python db/migrate.py up 001                # household_consumption (and: down 001)
 
 # Model — run from the repo ROOT as `python model/<script>.py` (Python puts model/ on the path,
 # so the flat imports work, and save_model.py's relative path model/model.joblib resolves correctly)
@@ -58,10 +59,11 @@ Connection comes from env, with a local fallback baked into every module:
 - `DB_HOST` — only consulted by `api/main.py` (set to `db` inside docker-compose); other modules ignore it.
 - Fallback when neither is set: `host=localhost port=5432 dbname=strompris user=strom password=strom`.
 
-The three original tables have no migration file and are assumed to exist (they do on Neon). New tables come as numbered migrations in `db/migrations/` (`NNN_name.up.sql` / `.down.sql`, idempotent, one transaction each), run with `db/migrate.py`:
+Tables come as numbered migrations in `db/migrations/` (`NNN_name.up.sql` / `.down.sql`, idempotent, one transaction each), run with `db/migrate.py`:
+- Migration 000 creates the three original tables below. They were made by hand on Neon first, so it's a no-op there (`IF NOT EXISTS`); its down script raises an error on purpose rather than dropping production data. Reset a local database with `docker compose down -v`.
 - `household_consumption(price_area, time_start, quantity_kwh, metering_points, elhub_updated)` — PK `(price_area, time_start)`, upserted. Hourly use of all households per price area from Elhub open data (`CONSUMPTION_PER_GROUP_MBA_HOUR`, group `household`). `quantity_kwh / metering_points` = average kWh per home. Migration 001.
 
-Original tables:
+Base tables (migration 000):
 - `prices(price_area, time_start, nok_per_kwh, eur_per_kwh, exr)` — PK `(price_area, time_start)`, upserted.
 - `weather(location, time_start, temperature)` — PK `(location, time_start)`, upserted; only `location='oslo'` is used.
 - `forecasts(price_area, time_start, forecast_nok_per_kwh)` — PK `(price_area, time_start)`, written nightly for accuracy grading.
