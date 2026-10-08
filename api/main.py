@@ -1,5 +1,7 @@
 import os
-from datetime import date, datetime, timedelta
+import threading
+import time
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -25,8 +27,6 @@ LLM = anthropic.Anthropic()
 
 LANDING_HTML = Path("api/landing.html").read_text()
 
-LANDING_HTML = Path("api/landing.html").read_text()
-
 app = FastAPI(title="Strompris API")
 
 
@@ -35,17 +35,87 @@ def landing():
     return LANDING_HTML
 
 
-
-
 def run_query(sql, params):
     with psycopg.connect(DB_CONN) as conn, conn.cursor() as cur:
         cur.execute(sql, params)
         return cur.fetchall()
 
 
+# --- Per-area response cache -------------------------------------------------
+# /forecast and /summary are expensive (model.predict + Open-Meteo, and a Claude
+# call for /summary) and get hit on every landing-page load. We cache per area
+# and invalidate when the data token changes (new price data arrived, or the
+# Oslo day rolled over), with a time-based backstop so we never serve stale
+# content on a quiet day. Cache is per-process; on a single Fly machine that is
+# the whole app. It survives suspend/resume and self-invalidates on day change.
+CACHE_MAX_AGE = 6 * 3600  # seconds — refresh even if the data token is unchanged
+_cache_lock = threading.Lock()
+_forecast_cache: dict = {}
+_summary_cache: dict = {}
+
+
+def _data_token(area):
+    """Cheap validity token: changes when new price data lands or the Oslo day rolls over."""
+    rows = run_query("SELECT max(time_start) FROM prices WHERE price_area = %s;", (area,))
+    latest = rows[0][0] if rows else None
+    return (datetime.now(OSLO).date(), latest)
+
+
+def cached(cache, area, compute):
+    """Return cached value for `area`, recomputing when the token changes or the
+    entry is older than CACHE_MAX_AGE. Thread-safe (endpoints run in a threadpool)."""
+    token = _data_token(area)
+    now = time.monotonic()
+    with _cache_lock:
+        entry = cache.get(area)
+        if entry is not None:
+            cached_token, cached_at, value = entry
+            if cached_token == token and now - cached_at < CACHE_MAX_AGE:
+                return value
+    value = compute()
+    with _cache_lock:
+        cache[area] = (token, now, value)
+    return value
+
+
+AREAS = ["NO1", "NO2", "NO3", "NO4", "NO5"]
+
+
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    """Report data freshness. Always HTTP 200; status lives in the body so Fly
+    autostart / uptime monitors never flap. status is one of ok | stale | error."""
+    now = datetime.now(OSLO)
+    try:
+        price_rows = run_query(
+            "SELECT price_area, max(time_start) FROM prices GROUP BY price_area;", ()
+        )
+        latest_price = {area: ts for area, ts in price_rows}
+        forecast_rows = run_query("SELECT max(time_start) FROM forecasts;", ())
+        latest_forecast = forecast_rows[0][0] if forecast_rows else None
+    except Exception as e:
+        return {"status": "error", "detail": f"{type(e).__name__}: {e}", "checked_at": now.isoformat()}
+
+    # Tomorrow's day-ahead prices publish ~13:00 CET; if they're still missing
+    # for any area after 15:00 Oslo, the nightly pipeline is behind -> stale.
+    tomorrow_start = datetime.combine(now.date() + timedelta(days=1), datetime.min.time(), tzinfo=OSLO)
+    status = "ok"
+    if now.hour >= 15:
+        for area in AREAS:
+            latest = latest_price.get(area)
+            if latest is None or latest.astimezone(OSLO) < tomorrow_start:
+                status = "stale"
+                break
+
+    return {
+        "status": status,
+        "latest_price": {
+            area: (latest_price[area].isoformat() if latest_price.get(area) else None)
+            for area in AREAS
+        },
+        "latest_forecast": latest_forecast.isoformat() if latest_forecast else None,
+        "checked_at": now.isoformat(),
+    }
 
 
 @app.get("/prices")
@@ -98,9 +168,8 @@ def fetch_forecast_temps():
         })
         resp.raise_for_status()
         data = resp.json()
-        from datetime import datetime as dt_cls
         return {
-            dt_cls.fromisoformat(t).replace(tzinfo=OSLO.tzinfo if False else __import__("datetime").timezone.utc): temp
+            datetime.fromisoformat(t).replace(tzinfo=timezone.utc): temp
             for t, temp in zip(data["hourly"]["time"], data["hourly"]["temperature_2m"])
             if temp is not None
         }
@@ -110,6 +179,10 @@ def fetch_forecast_temps():
 
 @app.get("/forecast")
 def forecast(area: str = "NO1"):
+    return cached(_forecast_cache, area, lambda: _compute_forecast(area))
+
+
+def _compute_forecast(area):
     rows = run_query(
         "SELECT time_start, nok_per_kwh FROM prices WHERE price_area = %s AND time_start <= NOW() ORDER BY time_start DESC LIMIT 200;",
         (area,),
@@ -149,7 +222,6 @@ def forecast(area: str = "NO1"):
         {"time_start": t.isoformat(), "forecast_nok_per_kwh": round(float(p), 4)}
         for t, p in zip(times, preds)
     ]
-
 
 
 @app.get("/ask")
@@ -226,6 +298,10 @@ def accuracy(area: str = "NO1", days: int = 7):
 
 @app.get("/summary")
 def daily_summary(area: str = "NO1"):
+    return cached(_summary_cache, area, lambda: _compute_summary(area))
+
+
+def _compute_summary(area):
     today_prices = get_prices(area=area, frm=date.today(), to=date.today())
     fcast = forecast(area=area)
 
