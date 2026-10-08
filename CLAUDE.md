@@ -31,11 +31,12 @@ python -m uvicorn api.main:app --reload    # http://127.0.0.1:8000  (/docs for O
 # Dashboard
 python -m streamlit run dashboard/app.py   # http://localhost:8501
 
-# Lint (same as CI)
+# Lint and tests (same as CI)
 ruff check .
+python -m pytest -q
 ```
 
-There is no test suite. CI (`.github/workflows/ci.yml`) runs `ruff check .` then a Docker build on every push/PR to `main`.
+CI (`.github/workflows/ci.yml`) runs `ruff check .`, `pytest`, then a Docker build on every push/PR to `main`. Tests live in `tests/` and cover the pure logic (`api/freshness.py`, `api/refresh.py`, `ingest/quality.py`); they need no database, model or API key.
 
 ## Working directory matters
 
@@ -69,11 +70,13 @@ The model is **trained on NO1 only** but served for every zone via `?area=NO1..N
 
 ## Nightly pipeline
 
-`.github/workflows/fetch-prices.yml` (cron 20:00 UTC / ~22:00 Oslo, or manual `workflow_dispatch`) runs the whole update as inline `python -c` scripts against Neon: fetch today+tomorrow prices for all five zones, refresh the last few days of weather, then **save forecasts by HTTP-calling the live `https://strompris-pipeline.fly.dev/forecast` endpoint** (not by importing the model). The `/accuracy` endpoint later joins those stored `forecasts` against actual `prices`.
+`.github/workflows/fetch-prices.yml` (cron 12:30, 14:45 and 20:17 UTC, or manual `workflow_dispatch`) runs the whole update as inline `python -c` scripts against Neon: fetch today+tomorrow prices for all five zones, refresh the last few days of weather, then **save forecasts by HTTP-calling the live `https://strompris-pipeline.fly.dev/forecast` endpoint** (not by importing the model). The `/accuracy` endpoint later joins those stored `forecasts` against actual `prices`. The last step, `ingest/quality.py`, fails the run if stored prices are missing or invalid (the 12:30 run checks only today).
+
+GitHub runs scheduled workflows best effort (often hours late, sometimes skipped), so the API also self-heals: `api/refresh.py` checks at most every 10 minutes, on requests to `/prices`, `/forecast` and `/summary`, whether today's (or after 13:00, tomorrow's) prices are missing, and fetches them from hvakosterstrommen.no in a background thread. `/health` only observes and never triggers a fetch, so it still reveals pipeline problems.
 
 ## Deployment
 
-Push to `main` → `.github/workflows/fly-deploy.yml` runs `flyctl deploy --remote-only`. The `Dockerfile` ships **only** `api/` + `model/model.joblib` and the installed deps — ingestion and training code are intentionally not in the image (ingestion runs from GitHub Actions, not the deployed container). `model/model.joblib` is force-tracked in git via a `.gitignore` negation (`!model/model.joblib`) despite the global `*.joblib` ignore; commit a freshly trained model to ship it.
+Push to `main` → `.github/workflows/fly-deploy.yml` runs `flyctl deploy --remote-only`. The `Dockerfile` ships **only** `api/` + `model/model.joblib` and the installed deps — ingestion and training code are intentionally not in the image. The one exception is the small self-healing fetch in `api/refresh.py`, which duplicates the URL and upsert from `ingest/` on purpose to keep that boundary. `model/model.joblib` is force-tracked in git via a `.gitignore` negation (`!model/model.joblib`) despite the global `*.joblib` ignore; commit a freshly trained model to ship it.
 
 ## LLM endpoints
 

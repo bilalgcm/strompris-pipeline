@@ -16,6 +16,7 @@ from fastapi import FastAPI, Query
 from fastapi.responses import HTMLResponse
 
 from api.freshness import AREAS, find_stale_areas
+from api.refresh import UPSERT_SQL, PriceRefresher, fetch_day
 
 load_dotenv()
 
@@ -24,6 +25,7 @@ DB_CONN = os.environ.get(
     f"host={os.environ.get('DB_HOST', 'localhost')} port=5432 dbname=strompris user=strom password=strom"
 )
 OSLO = ZoneInfo("Europe/Oslo")
+logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("strompris")
 FEATURES = ["hour", "dayofweek", "month", "is_weekend", "lag_24h", "lag_168h", "temperature", "temp_24h"]
 MODEL = joblib.load("model/model.joblib")
@@ -43,6 +45,20 @@ def run_query(sql, params):
     with psycopg.connect(DB_CONN) as conn, conn.cursor() as cur:
         cur.execute(sql, params)
         return cur.fetchall()
+
+
+def latest_price_per_area():
+    rows = run_query("SELECT price_area, max(time_start) FROM prices GROUP BY price_area;", ())
+    return {area: ts for area, ts in rows}
+
+
+def save_price_rows(rows):
+    with psycopg.connect(DB_CONN) as conn, conn.cursor() as cur:
+        cur.executemany(UPSERT_SQL, rows)
+
+
+# Fills in missing prices when the GitHub cron is late. See api/refresh.py.
+REFRESHER = PriceRefresher(get_latest=latest_price_per_area, fetch=fetch_day, save=save_price_rows)
 
 
 # --- Per-area response cache -------------------------------------------------
@@ -68,6 +84,7 @@ def _data_token(area):
 def cached(cache, area, compute):
     """Return cached value for `area`, recomputing when the token changes or the
     entry is older than CACHE_MAX_AGE. Thread-safe (endpoints run in a threadpool)."""
+    REFRESHER.refresh_in_background()
     token = _data_token(area)
     now = time.monotonic()
     with _cache_lock:
@@ -88,10 +105,7 @@ def health():
     autostart / uptime monitors never flap. status is one of ok | stale | error."""
     now = datetime.now(OSLO)
     try:
-        price_rows = run_query(
-            "SELECT price_area, max(time_start) FROM prices GROUP BY price_area;", ()
-        )
-        latest_price = {area: ts for area, ts in price_rows}
+        latest_price = latest_price_per_area()
         forecast_rows = run_query("SELECT max(time_start) FROM forecasts;", ())
         latest_forecast = forecast_rows[0][0] if forecast_rows else None
     except Exception:
@@ -114,6 +128,7 @@ def health():
 
 @app.get("/prices")
 def get_prices(area: str = "NO1", frm: date | None = Query(default=None, alias="from"), to: date | None = None):
+    REFRESHER.refresh_in_background()
     if to is None:
         to = date.today()
     if frm is None:

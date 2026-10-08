@@ -51,3 +51,9 @@ def test_utc_timestamps_from_the_database_work():
     # Postgres returns timestamptz values in UTC. 21:00 UTC is 23:00 Oslo in summer time.
     latest = all_areas(datetime(2026, 10, 8, 21, tzinfo=UTC))
     assert find_stale_areas(latest, at(2026, 10, 8, 9)) == []
+
+
+def test_custom_deadline_for_refresh():
+    latest = all_areas(at(2026, 10, 8, 23))
+    assert find_stale_areas(latest, at(2026, 10, 8, 13), deadline_hour=13) == AREAS
+    assert find_stale_areas(latest, at(2026, 10, 8, 12, 59), deadline_hour=13) == []
