@@ -1,3 +1,14 @@
+"""Backfill prices for one price area.
+
+Usage (from inside ingest/):
+    python backfill.py                       # NO1, last 7 days
+    python backfill.py NO2 2022-09-01        # one area from a start date until today
+
+Safe to rerun: rows are upserted. Sleeps 0.4 s between days to be polite to the free API,
+so four years takes about 10 minutes per area.
+"""
+
+import sys
 import time
 from datetime import date, timedelta
 
@@ -30,7 +41,8 @@ def backfill(start: date, end: date, area: str):
 
 
 if __name__ == "__main__":
+    area = sys.argv[1] if len(sys.argv) > 1 else PRICE_AREA
     end = date.today()
-    start = end - timedelta(days=DAYS_BACK)
-    print(f"Henter priser for {PRICE_AREA} fra {start} til {end}...\n")
-    backfill(start, end, PRICE_AREA)
+    start = date.fromisoformat(sys.argv[2]) if len(sys.argv) > 2 else end - timedelta(days=DAYS_BACK)
+    print(f"Henter priser for {area} fra {start} til {end}...\n")
+    backfill(start, end, area)

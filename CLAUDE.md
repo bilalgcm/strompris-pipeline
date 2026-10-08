@@ -16,9 +16,10 @@ docker compose up -d                       # starts Postgres on :5432 (strom/str
 
 # Ingestion — MUST run from inside ingest/ (see "Working directory" below)
 cd ingest && python fetch_prices.py        # today's prices, NO1 only
-cd ingest && python fetch_weather.py       # backfills Oslo weather 2022-09-01 → today
+cd ingest && python fetch_weather.py       # backfills Oslo weather 2022-09-01 → today (archive API; lags a few days)
+cd ingest && python fetch_weather.py recent 92   # last N days (max 92) via the forecast API; the nightly job uses 7
 cd ingest && python backfill_all.py        # last 30 days, all five zones
-cd ingest && python backfill.py            # single-zone historical backfill
+cd ingest && python backfill.py NO2 2022-09-01   # one zone from a date to today (default: NO1, last 7 days)
 cd ingest && python fetch_household.py     # Elhub household consumption, last 16 days (or: ... 2026-01-01 to backfill)
 cd ingest && python profile_check.py NO1 2026-09 1.32   # household profile vs. an invoice's average spot price
 
@@ -81,7 +82,7 @@ The model is **trained on NO1 only** but served for every zone via `?area=NO1..N
 
 ## Nightly pipeline
 
-`.github/workflows/fetch-prices.yml` (cron 12:30, 14:45 and 20:17 UTC, or manual `workflow_dispatch`) runs the whole update as inline `python -c` scripts against Neon: fetch today+tomorrow prices for all five zones, refresh the last few days of weather, then **save forecasts by HTTP-calling the live `https://strompris-pipeline.fly.dev/forecast` endpoint** (not by importing the model). The `/accuracy` endpoint later joins those stored `forecasts` against actual `prices`. Then `ingest/quality.py` fails the run if stored prices are missing or invalid (the 12:30 run checks only today). The last step, `ingest/fetch_household.py`, re-fetches 16 days of Elhub household consumption, since Elhub corrects values for about two weeks.
+`.github/workflows/fetch-prices.yml` (cron 12:30, 14:45 and 20:17 UTC, or manual `workflow_dispatch`) runs the whole update as inline `python -c` scripts against Neon: fetch today+tomorrow prices for all five zones, refresh the last few days of weather, then **save forecasts by HTTP-calling the live `https://strompris-pipeline.fly.dev/forecast` endpoint** (not by importing the model). The `/accuracy` endpoint later joins those stored `forecasts` against actual `prices`. Then `ingest/quality.py` fails the run if stored prices are missing or invalid (the 12:30 run checks only today), or if Oslo weather doesn't cover all of yesterday. Weather comes from Open-Meteo's forecast API with `past_days=7`; the archive API rejects recent end dates with 400, which silently stopped weather updates from 24 July 2026 until this was fixed. The last step, `ingest/fetch_household.py`, re-fetches 16 days of Elhub household consumption, since Elhub corrects values for about two weeks.
 
 GitHub runs scheduled workflows best effort (often hours late, sometimes skipped), so the API also self-heals: `api/refresh.py` checks at most every 10 minutes, on requests to `/prices`, `/forecast` and `/summary`, whether today's (or after 13:00, tomorrow's) prices are missing, and fetches them from hvakosterstrommen.no in a background thread. `/health` only observes and never triggers a fetch, so it still reveals pipeline problems.
 
