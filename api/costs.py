@@ -35,6 +35,9 @@ SUPPORT_RATE = 0.90
 # Norgespris 2026: 40 oere/kWh excl. VAT (50 oere incl. VAT), binding to 31.12.2026
 NORGESPRIS = 0.40  # kr/kWh excl. VAT
 
+# Both schemes only cover the first 5,000 kWh per month for a home (per metering point)
+MONTHLY_CAP_KWH = 5000
+
 # Elvia standard tariff for private households, 2026. Includes VAT, elavgift and Enova fee.
 # Day = weekdays 06:00-22:00. Night/weekend = all other hours, weekends and public holidays.
 ELVIA_DAY = 0.3640  # kr/kWh
