@@ -92,7 +92,7 @@ Stored prices are spot prices excl. VAT. `api/costs.py` turns them into what a h
 
 ## LLM endpoints
 
-`/summary` and `/ask` call Anthropic (`claude-haiku-4-5-20251001`) and require `ANTHROPIC_API_KEY` in `.env`. All prompts and responses are in Norwegian and intentionally use ASCII spellings (`oe`/`aa`) in the source strings.
+`/summary` and `/ask` call Anthropic (`claude-haiku-4-5-20251001`) and require `ANTHROPIC_API_KEY` in `.env`. All prompts and responses are in Norwegian and intentionally use ASCII spellings (`oe`/`aa`) in the source strings. Key numbers (cheapest/most expensive hour, real-bill savings) are computed in `api/prompts.py::price_facts` and given to the model as a FAKTA block; never let the model derive min/max or percentages from raw prices (it got them wrong). The page renders LLM output with `renderLlmText`, which HTML-escapes everything and only allows `**bold**`. `/ask` limits questions to 300 characters.
 
 ## Conventions
 

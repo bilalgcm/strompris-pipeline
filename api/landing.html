@@ -194,16 +194,16 @@
   <div class="card">
     <h2>Spør om strøm</h2>
     <div class="ask-row">
-      <input type="text" class="ask-input" id="ask-input" placeholder="F.eks: Jeg glemte vifta på i 10 timer, hva koster det?" />
+      <input type="text" class="ask-input" id="ask-input" maxlength="300" placeholder="F.eks: Jeg glemte vifta på i 10 timer, hva koster det?" />
       <button class="ask-btn" id="ask-btn" onclick="askQuestion()">Spør</button>
     </div>
     <div class="ask-answer" id="ask-answer"></div>
   </div>
 
   <div class="stats">
-    <div class="stat"><div class="stat-value" id="stat-avg">-</div><div class="stat-label">Snitt i dag</div></div>
-    <div class="stat"><div class="stat-value" id="stat-min">-</div><div class="stat-label">Lavest i dag</div></div>
-    <div class="stat"><div class="stat-value" id="stat-max">-</div><div class="stat-label">Høyest i dag</div></div>
+    <div class="stat"><div class="stat-value" id="stat-avg">-</div><div class="stat-label">Snitt i dag, spotpris eks. mva</div></div>
+    <div class="stat"><div class="stat-value" id="stat-min">-</div><div class="stat-label">Lavest i dag, spotpris eks. mva</div></div>
+    <div class="stat"><div class="stat-value" id="stat-max">-</div><div class="stat-label">Høyest i dag, spotpris eks. mva</div></div>
   </div>
 
   <div class="card">
@@ -236,13 +236,24 @@ const tomorrow = new Date(Date.parse(today + 'T12:00:00Z') + 24 * 3600 * 1000).t
 
 function getArea() { return document.getElementById('area').value; }
 
+// LLM text -> safe HTML. Escape everything first (the model's output is untrusted,
+// and /ask passes user input into the prompt), then allow only **bold**.
+// Markdown headings and list markers are turned into plain lines.
+function renderLlmText(text) {
+  return esc(text)
+    .split('\n')
+    .map((line) => line.replace(/^\s*#{1,6}\s+(.*)$/, '<strong>$1</strong>').replace(/^\s*[-*]\s+/, ''))
+    .join('<br>')
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+}
+
 async function loadSummary() {
   const el = document.getElementById('summary');
   el.innerHTML = '<span class="loading">Henter oppsummering...</span>';
   try {
     const res = await fetch('/summary?area=' + getArea());
     const data = await res.json();
-    el.innerHTML = data.summary.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/\n/g, '<br>');
+    el.innerHTML = renderLlmText(data.summary);
   } catch (e) {
     el.textContent = 'Kunne ikke hente oppsummering.';
   }
@@ -276,9 +287,9 @@ async function loadChart() {
     const todayPrices = prices.filter(p => osloDate(new Date(p.time_start)) === today).map(p => p.nok_per_kwh);
     if (todayPrices.length > 0) {
       const avg = todayPrices.reduce((a, b) => a + b, 0) / todayPrices.length;
-      document.getElementById('stat-avg').textContent = avg.toFixed(2) + ' kr';
-      document.getElementById('stat-min').textContent = Math.min(...todayPrices).toFixed(2) + ' kr';
-      document.getElementById('stat-max').textContent = Math.max(...todayPrices).toFixed(2) + ' kr';
+      document.getElementById('stat-avg').textContent = kr(avg) + ' kr';
+      document.getElementById('stat-min').textContent = kr(Math.min(...todayPrices)) + ' kr';
+      document.getElementById('stat-max').textContent = kr(Math.max(...todayPrices)) + ' kr';
     } else {
       ['stat-avg', 'stat-min', 'stat-max'].forEach(id => document.getElementById(id).textContent = '-');
     }
@@ -470,7 +481,7 @@ async function askQuestion() {
   try {
     const res = await fetch('/ask?area=' + getArea() + '&q=' + encodeURIComponent(q));
     const data = await res.json();
-    answer.innerHTML = data.answer.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/\n/g, '<br>');
+    answer.innerHTML = res.ok ? renderLlmText(data.answer) : 'Spørsmålet må være mellom 1 og 300 tegn.';
   } catch (e) {
     answer.textContent = 'Kunne ikke hente svar. Prøv igjen.';
   }
