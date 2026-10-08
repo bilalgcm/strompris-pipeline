@@ -3,7 +3,7 @@
 import pandas as pd
 import pytest
 from backtest import data_coverage, last_complete_months, mae_table, mark_evening_drop
-from features import add_features
+from features import add_features, add_previous_day
 
 
 def hourly(start, prices, tz="UTC"):
@@ -64,9 +64,10 @@ def test_mae_table_in_ore():
     results = pd.DataFrame({
         "area": ["NO1", "NO1"], "price": [1.0, 2.0],
         "naive_24h": [1.1, 1.8], "naive_168h": [1.0, 2.0], "model_no1": [0.9, 2.3], "model_zone": [1.0, 2.1],
+        "model_v2": [1.0, 2.0],
     })
     table = mae_table(results, "area")
-    assert table.loc["NO1"].tolist() == pytest.approx([15.0, 0.0, 20.0, 5.0])
+    assert table.loc["NO1"].tolist() == pytest.approx([15.0, 0.0, 20.0, 5.0, 0.0])
 
 
 def test_data_coverage_counts_hours_with_temperature():
@@ -76,3 +77,34 @@ def test_data_coverage_counts_hours_with_temperature():
     cov = data_coverage(pd.concat([no1, no2]), weather)
     assert cov.loc["NO1", "hours"] == 48 and cov.loc["NO1", "hours_with_temperature"] == 30
     assert cov.loc["NO2", "hours"] == 24 and cov.loc["NO2", "hours_with_temperature"] == 6
+
+
+# --- previous-day summary (7b) ---------------------------------------------
+
+def test_previous_day_summary():
+    # Day 1 (Oslo): 23 hours at 1.0, then 0.4 at 23:00. Day 2 rows get day 1's summary.
+    df = hourly("2026-10-09", [1.0] * 23 + [0.4] + [2.0] * 24, tz="Europe/Oslo")
+    out = add_previous_day(df.copy())
+    day2 = out.iloc[24]
+    assert day2["prev_day_last"] == 0.4
+    assert day2["prev_day_min"] == 0.4 and day2["prev_day_max"] == 1.0
+    assert day2["prev_day_mean"] == pytest.approx((23 * 1.0 + 0.4) / 24)
+
+
+def test_previous_day_is_empty_for_the_first_day():
+    df = hourly("2026-10-09", [1.0] * 48, tz="Europe/Oslo")
+    out = add_previous_day(df.copy())
+    assert out["prev_day_mean"].iloc[:24].isna().all()
+    assert out["prev_day_mean"].iloc[24:].notna().all()
+
+
+def test_incomplete_previous_day_gives_nan():
+    df = hourly("2026-10-09", [1.0] * 48, tz="Europe/Oslo").drop(index=[3, 4])  # day 1 has 22 hours
+    out = add_previous_day(df.copy())
+    assert out["prev_day_mean"].iloc[22:].isna().all()
+
+
+def test_spring_dst_day_with_23_hours_counts_as_complete():
+    df = hourly("2026-03-29", [1.0] * (23 + 24), tz="Europe/Oslo")  # 29 March has 23 hours
+    out = add_previous_day(df.copy())
+    assert out["prev_day_mean"].iloc[23:].notna().all()

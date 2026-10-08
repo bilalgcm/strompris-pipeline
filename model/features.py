@@ -60,7 +60,28 @@ def add_features(prices, weather):
     df["lag_168h"] = (df["time_start"] - pd.Timedelta(hours=168)).map(price_at)
     df["temp_24h"] = (df["time_start"] - pd.Timedelta(hours=24)).map(temp_at)
 
+    df = add_previous_day(df)
     return df.dropna().reset_index(drop=True)
+
+
+MIN_HOURS_PER_DAY = 23  # a DST spring day has 23 hours; fewer means the day is incomplete
+
+
+def add_previous_day(df):
+    """Summarise the previous Oslo calendar day for every hour: mean, min, max and its last price.
+
+    lag_24h only shows the same hour yesterday, so the model never saw that prices fell
+    sharply late the evening before. The backtest showed a +18 oere bias after such evenings.
+    When a day is forecast, the whole previous day is already published, so these are
+    known at forecast time, exactly like lag_24h. Incomplete previous days give NaN.
+    """
+    day = df["time_start"].dt.tz_convert("Europe/Oslo").dt.date
+    daily = df.groupby(day)["price"].agg(["mean", "min", "max", "last", "size"])
+    daily = daily[daily["size"] >= MIN_HOURS_PER_DAY]
+    prev = pd.Series(day).map(lambda d: d - pd.Timedelta(days=1))
+    for col in ["mean", "min", "max", "last"]:
+        df[f"prev_day_{col}"] = prev.map(daily[col]).astype(float)
+    return df
 
 
 def build_features(area="NO1"):
