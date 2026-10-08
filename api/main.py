@@ -15,6 +15,8 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, Query
 from fastapi.responses import HTMLResponse
 
+from api.freshness import AREAS, find_stale_areas
+
 load_dotenv()
 
 DB_CONN = os.environ.get(
@@ -80,9 +82,6 @@ def cached(cache, area, compute):
     return value
 
 
-AREAS = ["NO1", "NO2", "NO3", "NO4", "NO5"]
-
-
 @app.get("/health")
 def health():
     """Report data freshness. Always HTTP 200; status lives in the body so Fly
@@ -99,18 +98,7 @@ def health():
         log.exception("Health check failed")
         return {"status": "error", "checked_at": now.isoformat()}
 
-    # A day is "covered" when we have its last interval (23:00, or 23:45 with
-    # 15-min resolution). Today must always be covered. Tomorrow must be covered
-    # after 16:00, which leaves margin for the 12:30 UTC fetch.
-    today_start = datetime.combine(now.date(), datetime.min.time(), tzinfo=OSLO)
-    tomorrow_start = today_start + timedelta(days=1)
-    required = tomorrow_start + timedelta(days=1) if now.hour >= 16 else tomorrow_start
-
-    stale_areas = [
-        area for area in AREAS
-        if latest_price.get(area) is None
-        or latest_price[area].astimezone(OSLO) < required - timedelta(hours=1)
-    ]
+    stale_areas = find_stale_areas(latest_price, now)
 
     return {
         "status": "stale" if stale_areas else "ok",
