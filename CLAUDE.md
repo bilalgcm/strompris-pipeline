@@ -19,6 +19,11 @@ cd ingest && python fetch_prices.py        # today's prices, NO1 only
 cd ingest && python fetch_weather.py       # backfills Oslo weather 2022-09-01 → today
 cd ingest && python backfill_all.py        # last 30 days, all five zones
 cd ingest && python backfill.py            # single-zone historical backfill
+cd ingest && python fetch_household.py     # Elhub household consumption, last 16 days (or: ... 2026-01-01 to backfill)
+cd ingest && python profile_check.py NO1 2026-09 1.32   # household profile vs. an invoice's average spot price
+
+# Migrations (from repo ROOT, uses DATABASE_URL)
+python db/migrate.py up 001                # and: down 001
 
 # Model — MUST run from inside model/
 cd model && python baseline.py             # print naive-baseline MAE the model must beat
@@ -36,7 +41,7 @@ ruff check .
 python -m pytest -q
 ```
 
-CI (`.github/workflows/ci.yml`) runs `ruff check .`, `pytest`, then a Docker build on every push/PR to `main`. Tests live in `tests/` and cover the pure logic (`api/freshness.py`, `api/refresh.py`, `api/forecasting.py`, `api/prompts.py`, `api/costs.py`, `api/holidays.py`, `api/appliances.py`, `ingest/quality.py`); they need no database, model or API key.
+CI (`.github/workflows/ci.yml`) runs `ruff check .`, `pytest`, then a Docker build on every push/PR to `main`. Tests live in `tests/` and cover the pure logic (`api/freshness.py`, `api/refresh.py`, `api/forecasting.py`, `api/prompts.py`, `api/costs.py`, `api/holidays.py`, `api/appliances.py`, `api/comparison.py`, `ingest/quality.py`, `ingest/fetch_household.py`); they need no database, model or API key.
 
 ## Working directory matters
 
@@ -49,7 +54,10 @@ Connection comes from env, with a local fallback baked into every module:
 - `DB_HOST` — only consulted by `api/main.py` (set to `db` inside docker-compose); other modules ignore it.
 - Fallback when neither is set: `host=localhost port=5432 dbname=strompris user=strom password=strom`.
 
-**There is no schema/migration file.** Three tables are assumed to already exist and must be created by hand (or they exist on Neon):
+The three original tables have no migration file and are assumed to exist (they do on Neon). New tables come as numbered migrations in `db/migrations/` (`NNN_name.up.sql` / `.down.sql`, idempotent, one transaction each), run with `db/migrate.py`:
+- `household_consumption(price_area, time_start, quantity_kwh, metering_points, elhub_updated)` — PK `(price_area, time_start)`, upserted. Hourly use of all households per price area from Elhub open data (`CONSUMPTION_PER_GROUP_MBA_HOUR`, group `household`). `quantity_kwh / metering_points` = average kWh per home. Migration 001.
+
+Original tables:
 - `prices(price_area, time_start, nok_per_kwh, eur_per_kwh, exr)` — PK `(price_area, time_start)`, upserted.
 - `weather(location, time_start, temperature)` — PK `(location, time_start)`, upserted; only `location='oslo'` is used.
 - `forecasts(price_area, time_start, forecast_nok_per_kwh)` — PK `(price_area, time_start)`, written nightly for accuracy grading.
@@ -70,7 +78,7 @@ The model is **trained on NO1 only** but served for every zone via `?area=NO1..N
 
 ## Nightly pipeline
 
-`.github/workflows/fetch-prices.yml` (cron 12:30, 14:45 and 20:17 UTC, or manual `workflow_dispatch`) runs the whole update as inline `python -c` scripts against Neon: fetch today+tomorrow prices for all five zones, refresh the last few days of weather, then **save forecasts by HTTP-calling the live `https://strompris-pipeline.fly.dev/forecast` endpoint** (not by importing the model). The `/accuracy` endpoint later joins those stored `forecasts` against actual `prices`. The last step, `ingest/quality.py`, fails the run if stored prices are missing or invalid (the 12:30 run checks only today).
+`.github/workflows/fetch-prices.yml` (cron 12:30, 14:45 and 20:17 UTC, or manual `workflow_dispatch`) runs the whole update as inline `python -c` scripts against Neon: fetch today+tomorrow prices for all five zones, refresh the last few days of weather, then **save forecasts by HTTP-calling the live `https://strompris-pipeline.fly.dev/forecast` endpoint** (not by importing the model). The `/accuracy` endpoint later joins those stored `forecasts` against actual `prices`. Then `ingest/quality.py` fails the run if stored prices are missing or invalid (the 12:30 run checks only today). The last step, `ingest/fetch_household.py`, re-fetches 16 days of Elhub household consumption, since Elhub corrects values for about two weeks.
 
 GitHub runs scheduled workflows best effort (often hours late, sometimes skipped), so the API also self-heals: `api/refresh.py` checks at most every 10 minutes, on requests to `/prices`, `/forecast` and `/summary`, whether today's (or after 13:00, tomorrow's) prices are missing, and fetches them from hvakosterstrommen.no in a background thread. `/health` only observes and never triggers a fetch, so it still reveals pipeline problems.
 
