@@ -1,0 +1,63 @@
+"""Pure helpers for dates and the forecast window.
+
+Kept free of database, model and HTTP imports so they can be tested on their own.
+All timestamps are UTC-aware datetimes, like the ones Postgres returns.
+"""
+
+from datetime import UTC, date, datetime, timedelta
+
+from api.freshness import OSLO
+
+
+def oslo_today(now: datetime | None = None) -> date:
+    """Today's date in Oslo. date.today() on Fly is UTC, which is wrong 00:00-02:00 Oslo time."""
+    return (now or datetime.now(OSLO)).astimezone(OSLO).date()
+
+
+def oslo_midnight(day: date) -> datetime:
+    """Start of an Oslo calendar day, as a UTC datetime.
+
+    Passing a plain date to Postgres compares it against UTC midnight, which is
+    01:00 or 02:00 Oslo time, so date ranges have to be converted first.
+    """
+    return datetime.combine(day, datetime.min.time(), tzinfo=OSLO).astimezone(UTC)
+
+
+def forecast_hours(latest: datetime) -> list[datetime]:
+    """Every hour after the newest known price, up to the end of the next Oslo day.
+
+    With a complete day stored (latest = 23:00 Oslo) this is exactly the next
+    calendar day: 24 hours, or 23/25 on DST days. If the newest day is incomplete,
+    the gap is forecast too, so we never return fewer than 24 hours.
+    """
+    latest = latest.astimezone(UTC)
+    # Use calendar days, not "+24 hours": on a 23-hour DST day, +24h lands in the day after.
+    last_day = latest.astimezone(OSLO).date() + timedelta(days=1)
+    end = oslo_midnight(last_day + timedelta(days=1))
+    hours, t = [], latest + timedelta(hours=1)
+    while t < end:
+        hours.append(t)
+        t += timedelta(hours=1)
+    return hours
+
+
+def build_feature_rows(hours: list[datetime], known_prices: dict, known_temps: dict) -> list[dict]:
+    """Build the model's 8 features for each forecast hour, the same way model/features.py does.
+
+    Lags are counted in UTC hours, which matches training (24 rows back in hourly UTC data).
+    Missing values become None; HistGradientBoostingRegressor handles them natively.
+    """
+    rows = []
+    for t in hours:
+        local = t.astimezone(OSLO)
+        rows.append({
+            "hour": local.hour,
+            "dayofweek": local.weekday(),
+            "month": local.month,
+            "is_weekend": 1 if local.weekday() >= 5 else 0,
+            "lag_24h": known_prices.get(t - timedelta(hours=24)),
+            "lag_168h": known_prices.get(t - timedelta(hours=168)),
+            "temperature": known_temps.get(t),
+            "temp_24h": known_temps.get(t - timedelta(hours=24)),
+        })
+    return rows

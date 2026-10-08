@@ -15,7 +15,14 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, Query
 from fastapi.responses import HTMLResponse
 
+from api.forecasting import (
+    build_feature_rows,
+    forecast_hours,
+    oslo_midnight,
+    oslo_today,
+)
 from api.freshness import AREAS, find_stale_areas
+from api.prompts import price_context
 from api.refresh import UPSERT_SQL, PriceRefresher, fetch_day
 
 load_dotenv()
@@ -130,12 +137,12 @@ def health():
 def get_prices(area: str = "NO1", frm: date | None = Query(default=None, alias="from"), to: date | None = None):
     REFRESHER.refresh_in_background()
     if to is None:
-        to = date.today()
+        to = oslo_today()
     if frm is None:
         frm = to - timedelta(days=7)
     rows = run_query(
         "SELECT time_start, nok_per_kwh FROM prices WHERE price_area = %s AND time_start >= %s AND time_start < %s ORDER BY time_start;",
-        (area, frm, to + timedelta(days=1)),
+        (area, oslo_midnight(frm), oslo_midnight(to + timedelta(days=1))),
     )
     return [{"time_start": ts.isoformat(), "nok_per_kwh": float(nok)} for ts, nok in rows]
 
@@ -143,12 +150,12 @@ def get_prices(area: str = "NO1", frm: date | None = Query(default=None, alias="
 @app.get("/stats")
 def get_stats(area: str = "NO1", frm: date | None = Query(default=None, alias="from"), to: date | None = None):
     if to is None:
-        to = date.today()
+        to = oslo_today()
     if frm is None:
         frm = to - timedelta(days=30)
     count, avg, mn, mx = run_query(
         "SELECT count(*), round(avg(nok_per_kwh),3), round(min(nok_per_kwh),3), round(max(nok_per_kwh),3) FROM prices WHERE price_area = %s AND time_start >= %s AND time_start < %s;",
-        (area, frm, to + timedelta(days=1)),
+        (area, oslo_midnight(frm), oslo_midnight(to + timedelta(days=1))),
     )[0]
     return {
         "area": area, "from": frm.isoformat(), "to": to.isoformat(), "hours": count,
@@ -168,12 +175,12 @@ def prices_by_hour(area: str = "NO1"):
 
 
 def fetch_forecast_temps():
-    """Fetch next 48h of temperature forecasts from Open-Meteo."""
+    """Fetch temperature forecasts from Open-Meteo, keyed by UTC hour."""
     try:
         resp = requests.get("https://api.open-meteo.com/v1/forecast", params={
             "latitude": 59.91, "longitude": 10.75,
             "hourly": "temperature_2m", "timezone": "UTC",
-            "forecast_days": 3,
+            "forecast_days": 4,  # counted in UTC days; 4 covers the day after tomorrow at any hour
         })
         resp.raise_for_status()
         data = resp.json()
@@ -192,65 +199,45 @@ def forecast(area: str = "NO1"):
 
 
 def _compute_forecast(area):
+    """Forecast every hour after the newest stored price (see api/forecasting.py).
+
+    Before ~13:00 that is tomorrow; after tomorrow's prices are published it is the
+    day after tomorrow. We never "forecast" hours whose real price is already known.
+    """
     rows = run_query(
-        "SELECT time_start, nok_per_kwh FROM prices WHERE price_area = %s AND time_start <= NOW() ORDER BY time_start DESC LIMIT 200;",
+        "SELECT time_start, nok_per_kwh FROM prices WHERE price_area = %s ORDER BY time_start DESC LIMIT 200;",
         (area,),
     )
     known_prices = {ts: float(p) for ts, p in rows}
     latest = max(known_prices)
 
-    # Get recent temperatures from DB
+    # Recent temperatures from the DB, overridden by Open-Meteo's forecast for future hours
     temp_rows = run_query(
         "SELECT time_start, temperature FROM weather WHERE location = %s ORDER BY time_start DESC LIMIT 200;",
         ("oslo",),
     )
     known_temps = {ts: float(t) for ts, t in temp_rows}
+    known_temps.update(fetch_forecast_temps())
 
-    # Get forecast temperatures for future hours
-    forecast_temps = fetch_forecast_temps()
-    known_temps.update(forecast_temps)
-
-    future, times = [], []
-    for h in range(1, 25):
-        t = latest + timedelta(hours=h)
-        local = t.astimezone(OSLO)
-        future.append({
-            "hour": local.hour,
-            "dayofweek": local.weekday(),
-            "month": local.month,
-            "is_weekend": 1 if local.weekday() >= 5 else 0,
-            "lag_24h": known_prices.get(t - timedelta(hours=24)),
-            "lag_168h": known_prices.get(t - timedelta(hours=168)),
-            "temperature": known_temps.get(t),
-            "temp_24h": known_temps.get(t - timedelta(hours=24)),
-        })
-        times.append(t)
-
-    preds = MODEL.predict(pd.DataFrame(future)[FEATURES])
+    hours = forecast_hours(latest)
+    features = pd.DataFrame(build_feature_rows(hours, known_prices, known_temps), dtype=float)
+    preds = MODEL.predict(features[FEATURES])
     return [
         {"time_start": t.isoformat(), "forecast_nok_per_kwh": round(float(p), 4)}
-        for t, p in zip(times, preds)
+        for t, p in zip(hours, preds)
     ]
 
 
 @app.get("/ask")
 def ask_question(q: str, area: str = "NO1"):
     """Answer a freeform question using real price data."""
-    today_prices = get_prices(area=area, frm=date.today(), to=date.today())
-    fcast = forecast(area=area)
+    today = oslo_today()
+    actual = get_prices(area=area, frm=today, to=today + timedelta(days=1))
+    context = price_context(today, actual, forecast(area=area))
 
-    def fmt(prices, key):
-        lines = []
-        for p in prices:
-            ts = datetime.fromisoformat(p["time_start"]).astimezone(OSLO)
-            lines.append(f"  kl {ts.strftime('%H:%M')}: {p[key]:.2f} kr/kWh")
-        return "\n".join(lines)
+    prompt = f"""Prisdata for {area}:
 
-    prompt = f"""Prisdata for {area} i dag:
-{fmt(today_prices, "nok_per_kwh")}
-
-Prognose neste 24 timer:
-{fmt(fcast, "forecast_nok_per_kwh")}
+{context}
 
 Spoersmaal fra bruker: {q}
 
@@ -311,25 +298,15 @@ def daily_summary(area: str = "NO1"):
 
 
 def _compute_summary(area):
-    today_prices = get_prices(area=area, frm=date.today(), to=date.today())
-    fcast = forecast(area=area)
+    today = oslo_today()
+    actual = get_prices(area=area, frm=today, to=today + timedelta(days=1))
+    context = price_context(today, actual, forecast(area=area))
 
-    def fmt(prices, key):
-        lines = []
-        for p in prices:
-            ts = datetime.fromisoformat(p["time_start"]).astimezone(OSLO)
-            lines.append(f"  kl {ts.strftime('%H:%M')}  {p[key]:.2f} kr/kWh")
-        return "\n".join(lines)
+    prompt = f"""Her er stroemprisene for prisomraade {area}.
 
-    prompt = f"""Her er stromprisene for prisomraade {area}.
+{context}
 
-Dagens faktiske priser:
-{fmt(today_prices, "nok_per_kwh")}
-
-Prognose neste 24 timer:
-{fmt(fcast, "forecast_nok_per_kwh")}
-
-Gi en kort, nyttig oppsummering paa norsk (3-5 setninger). Si naar stroemmen er billigst og dyrest i dag og i morgen, og gi et konkret tips om naar det loenner seg aa bruke stroem (f.eks. vaskemaskin, oppvaskmaskin)."""
+Gi en kort, nyttig oppsummering paa norsk (3-5 setninger). Si naar stroemmen er billigst og dyrest i dag og i morgen. Bruk faktiske priser naar de finnes, og si tydelig fra naar du bygger paa prognosen. Gi et konkret tips om naar det loenner seg aa bruke stroem (f.eks. vaskemaskin, oppvaskmaskin)."""
 
     response = LLM.messages.create(
         model="claude-haiku-4-5-20251001",
@@ -339,6 +316,6 @@ Gi en kort, nyttig oppsummering paa norsk (3-5 setninger). Si naar stroemmen er 
     )
     return {
         "area": area,
-        "date": date.today().isoformat(),
+        "date": today.isoformat(),
         "summary": response.content[0].text,
     }
