@@ -36,7 +36,7 @@ ruff check .
 python -m pytest -q
 ```
 
-CI (`.github/workflows/ci.yml`) runs `ruff check .`, `pytest`, then a Docker build on every push/PR to `main`. Tests live in `tests/` and cover the pure logic (`api/freshness.py`, `api/refresh.py`, `api/forecasting.py`, `api/prompts.py`, `api/costs.py`, `api/holidays.py`, `ingest/quality.py`); they need no database, model or API key.
+CI (`.github/workflows/ci.yml`) runs `ruff check .`, `pytest`, then a Docker build on every push/PR to `main`. Tests live in `tests/` and cover the pure logic (`api/freshness.py`, `api/refresh.py`, `api/forecasting.py`, `api/prompts.py`, `api/costs.py`, `api/holidays.py`, `api/appliances.py`, `ingest/quality.py`); they need no database, model or API key.
 
 ## Working directory matters
 
@@ -80,7 +80,7 @@ Push to `main` → `.github/workflows/fly-deploy.yml` runs `flyctl deploy --remo
 
 ## Household cost (`/cost`)
 
-Stored prices are spot prices excl. VAT. `api/costs.py` turns them into what a household actually pays per kWh: spot + supplier markup + VAT (none in NO4) minus stroemstoette (90 % above 77 oere excl. VAT, plus VAT) plus nettleie energiledd, and the same with Norgespris (40 oere excl. VAT, no stroemstoette). Nettleie defaults to Elvia's 2026 standard tariff (day weekdays 06-22, night/weekend/holidays otherwise; `api/holidays.py`), overridable with `nettleie_day`/`nettleie_night`. Fixed monthly costs are deliberately left out. **All rates are for 2026 and must be updated every January**, together with their tests.
+Stored prices are spot prices excl. VAT. `api/costs.py` turns them into what a household actually pays per kWh: spot + supplier markup + VAT (none in NO4) minus stroemstoette (90 % above 77 oere excl. VAT, plus VAT) plus nettleie energiledd, and the same with Norgespris (40 oere excl. VAT, no stroemstoette). Nettleie defaults to Elvia's 2026 standard tariff (day weekdays 06-22, night/weekend/holidays otherwise; `api/holidays.py`), overridable with `nettleie_day`/`nettleie_night`. `/cost/now` adds the real price this hour and, per appliance in `api/appliances.py` (typical consumption estimates), the cost now vs. the cheapest start until the last published hour, for spot and Norgespris separately. The landing page's first card renders it. Fixed monthly costs are deliberately left out. **All rates are for 2026 and must be updated every January**, together with their tests.
 
 ## LLM endpoints
 

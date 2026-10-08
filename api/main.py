@@ -15,6 +15,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, Query
 from fastapi.responses import HTMLResponse
 
+from api.appliances import APPLIANCES, appliance_report, current_index
 from api.costs import Nettleie, norgespris_cost, spot_cost
 from api.forecasting import (
     build_feature_rows,
@@ -148,36 +149,66 @@ def get_prices(area: str = "NO1", frm: date | None = Query(default=None, alias="
     return [{"time_start": ts.isoformat(), "nok_per_kwh": float(nok)} for ts, nok in rows]
 
 
-@app.get("/cost")
-def get_cost(
-    area: str = Query(default="NO1", pattern="^NO[1-5]$"),
-    markup: float = Query(default=0.0, ge=-0.5, le=2.0, description="Supplier markup, kr/kWh excl. VAT"),
-    nettleie_day: float | None = Query(default=None, ge=0, le=3, description="Own energiledd, day, kr/kWh incl. VAT"),
-    nettleie_night: float | None = Query(default=None, ge=0, le=3, description="Own energiledd, night/weekend"),
-):
-    """What a household actually pays per kWh, hour by hour, today and tomorrow (see api/costs.py).
+def _nettleie(day: float | None, night: float | None) -> Nettleie:
+    if day is None and night is None:
+        return Nettleie()
+    return Nettleie(day=day if day is not None else night, night=night if night is not None else day, name="egendefinert")
 
-    Defaults to Elvia's 2026 tariff and no supplier markup.
-    """
-    if nettleie_day is not None or nettleie_night is not None:
-        nettleie = Nettleie(
-            day=nettleie_day if nettleie_day is not None else nettleie_night,
-            night=nettleie_night if nettleie_night is not None else nettleie_day,
-            name="egendefinert",
-        )
-    else:
-        nettleie = Nettleie()
 
+def _cost_hours(area: str, markup: float, nettleie: Nettleie) -> list[tuple]:
+    """(timestamp, spot Breakdown, Norgespris Breakdown) for every stored hour today and tomorrow."""
     today = oslo_today()
     hours = []
     for p in get_prices(area=area, frm=today, to=today + timedelta(days=1)):
         ts = datetime.fromisoformat(p["time_start"])
-        hours.append({
-            "time_start": p["time_start"],
-            "spot": spot_cost(p["nok_per_kwh"], ts, area, markup, nettleie).as_dict(),
-            "norgespris": norgespris_cost(ts, area, markup, nettleie).as_dict(),
-        })
+        hours.append((ts, spot_cost(p["nok_per_kwh"], ts, area, markup, nettleie), norgespris_cost(ts, area, markup, nettleie)))
+    return hours
+
+
+AREA = Query(default="NO1", pattern="^NO[1-5]$")
+MARKUP = Query(default=0.0, ge=-0.5, le=2.0, description="Supplier markup, kr/kWh excl. VAT")
+NETTLEIE_DAY = Query(default=None, ge=0, le=3, description="Own energiledd, day, kr/kWh incl. VAT")
+NETTLEIE_NIGHT = Query(default=None, ge=0, le=3, description="Own energiledd, night/weekend")
+
+
+@app.get("/cost")
+def get_cost(area: str = AREA, markup: float = MARKUP, nettleie_day: float | None = NETTLEIE_DAY,
+             nettleie_night: float | None = NETTLEIE_NIGHT):
+    """What a household actually pays per kWh, hour by hour, today and tomorrow (see api/costs.py).
+
+    Defaults to Elvia's 2026 tariff and no supplier markup.
+    """
+    nettleie = _nettleie(nettleie_day, nettleie_night)
+    hours = [
+        {"time_start": ts.isoformat(), "spot": spot.as_dict(), "norgespris": norges.as_dict()}
+        for ts, spot, norges in _cost_hours(area, markup, nettleie)
+    ]
     return {"area": area, "markup": markup, "nettleie": nettleie.name, "hours": hours}
+
+
+@app.get("/cost/now")
+def get_cost_now(area: str = AREA, markup: float = MARKUP, nettleie_day: float | None = NETTLEIE_DAY,
+                 nettleie_night: float | None = NETTLEIE_NIGHT):
+    """The real price this hour, and what everyday appliances cost now vs. at the cheapest time.
+
+    Cheapest time is searched from now until the last published hour, separately for
+    spot and Norgespris (see api/appliances.py).
+    """
+    nettleie = _nettleie(nettleie_day, nettleie_night)
+    hours = _cost_hours(area, markup, nettleie)
+    times = [ts for ts, _, _ in hours]
+    now_index = current_index(times, datetime.now(OSLO))
+    if now_index is None:
+        return {"area": area, "message": "Mangler priser for denne timen."}
+
+    result = {"area": area, "nettleie": nettleie.name, "time_start": times[now_index].isoformat()}
+    for tariff, column in (("spot", 1), ("norgespris", 2)):
+        totals = [h[column].total for h in hours]
+        result[tariff] = {
+            "now": hours[now_index][column].as_dict(),
+            "appliances": [appliance_report(times, totals, now_index, a) for a in APPLIANCES],
+        }
+    return result
 
 
 @app.get("/stats")
