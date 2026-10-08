@@ -66,3 +66,10 @@ jobs:
               except Exception as e:
                   print(f'Forecast {area}: feilet ({e})')
           "
+      - name: Data-quality check
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          # The 12:30 run only checks today, because tomorrow may not be published yet.
+          # The 20:00 run and manual runs check today and tomorrow.
+          CHECK_TOMORROW: ${{ github.event.schedule != '30 12 * * *' }}
+        run: python ingest/quality.py
