@@ -75,7 +75,7 @@ Original tables:
 ```
 
 is **duplicated** in `model/save_model.py`, `model/train.py`, and `api/main.py` — keep all three in sync when changing features. Features are built two different ways that must agree:
-- **Training** (`model/features.py`): `add_features` (pure, used by training and the backtest) joins prices and weather on `time_start`, adds calendar fields in `Europe/Oslo`, and looks lags up **by timestamp** (t - 24h, t - 168h), so gaps in the data can't shift them.
+- **Training** (`model/features.py`): `add_features` (pure, used by training and the backtest) joins prices and weather on `time_start`, adds calendar fields in `Europe/Oslo`, and looks lags up **by timestamp** (t - 24h, t - 168h), so gaps in the data can't shift them. It also adds `prev_day_mean/min/max/last` (summary of the previous Oslo day). These are **not used by the live model yet**; `model/backtest.py` evaluates them as `model_v2`, and they only go live (in `save_model.py`, `api/main.py` FEATURES and `api/forecasting.py`) if the backtest shows they're better.
 - **Serving** (`api/main.py::_compute_forecast` + `api/forecasting.py`): reconstructs the same 8 features per future hour in Python, pulling recent prices/temps from the DB and future temps live from Open-Meteo. The forecast window starts after the newest stored price and runs to the end of the next Oslo day (`forecast_hours`), so it never covers hours whose real price is already published: before ~13:00 that is tomorrow, after publication the day after tomorrow.
 
 The model is **trained on NO1 only** but served for every zone via `?area=NO1..NO5`. The train/test split cutoff lives in `model/baseline.py` (`CUTOFF`).

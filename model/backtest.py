@@ -11,6 +11,7 @@ Compared side by side:
     naive_168h    same price as the same hour last week
     model_no1     today's setup: one model trained on NO1, used for every area
     model_zone    one model per area, trained on that area's own history
+    model_v2      like model_no1, plus a summary of the previous day (candidate for 7b)
 
 Usage (from the repo root, after `python model/export_data.py`):
     python model/backtest.py            # last 12 months
@@ -28,8 +29,10 @@ from sklearn.ensemble import HistGradientBoostingRegressor
 
 DATA_DIR = Path(__file__).parent / "data"
 FEATURES = ["hour", "dayofweek", "month", "is_weekend", "lag_24h", "lag_168h", "temperature", "temp_24h"]
+# Candidate for 7b: the same plus a summary of the previous day (see features.add_previous_day)
+FEATURES_V2 = FEATURES + ["prev_day_mean", "prev_day_min", "prev_day_max", "prev_day_last"]
 AREAS = ["NO1", "NO2", "NO3", "NO4", "NO5"]
-METHODS = ["naive_24h", "naive_168h", "model_no1", "model_zone"]
+METHODS = ["naive_24h", "naive_168h", "model_no1", "model_zone", "model_v2"]
 EVENING_DROP = 0.30  # previous day's 23:00 price at least 30 % below its daily mean
 MIN_TRAIN_HOURS = 24 * 90  # don't train a per-area model on less than ~3 months of history
 
@@ -79,8 +82,8 @@ def mark_evening_drop(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def fit(train: pd.DataFrame) -> HistGradientBoostingRegressor:
-    return HistGradientBoostingRegressor(random_state=0).fit(train[FEATURES], train["price"])
+def fit(train: pd.DataFrame, features: list[str] = FEATURES) -> HistGradientBoostingRegressor:
+    return HistGradientBoostingRegressor(random_state=0).fit(train[features], train["price"])
 
 
 def run(prices: pd.DataFrame, weather: pd.DataFrame, n_months: int) -> pd.DataFrame:
@@ -93,6 +96,7 @@ def run(prices: pd.DataFrame, weather: pd.DataFrame, n_months: int) -> pd.DataFr
         end = start + pd.offsets.MonthBegin(1)
         no1 = by_area["NO1"]
         model_no1 = fit(no1[no1["time_start"] < start])
+        model_v2 = fit(no1[no1["time_start"] < start], FEATURES_V2)
         for area, df in by_area.items():
             train = df[df["time_start"] < start]
             test = df[(df["time_start"] >= start) & (df["time_start"] < end)].copy()
@@ -107,6 +111,7 @@ def run(prices: pd.DataFrame, weather: pd.DataFrame, n_months: int) -> pd.DataFr
             test["naive_24h"] = test["lag_24h"]
             test["naive_168h"] = test["lag_168h"]
             test["model_no1"] = model_no1.predict(test[FEATURES])
+            test["model_v2"] = model_v2.predict(test[FEATURES_V2])
             # For NO1 the per-zone model is the same model, so reuse its forecast
             test["model_zone"] = test["model_no1"] if area == "NO1" else fit(train).predict(test[FEATURES])
             results.append(test)
