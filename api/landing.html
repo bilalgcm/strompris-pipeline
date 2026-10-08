@@ -41,6 +41,23 @@
   .ask-btn:disabled { opacity: 0.6; cursor: not-allowed; }
   .ask-answer { margin-top: 14px; color: #d0d0d0; line-height: 1.7; display: none; }
 
+  /* Real cost now */
+  .cost-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 6px; }
+  .cost-head h2 { margin-bottom: 0; }
+  .tariff-toggle { display: inline-flex; background: #0b0f14; border: 1px solid #2a3340; border-radius: 8px; padding: 3px; }
+  .tariff-toggle button { background: none; border: none; color: #8a8f98; padding: 6px 12px; border-radius: 6px; font-size: 0.82rem; cursor: pointer; }
+  .tariff-toggle button.active { background: #1D9E75; color: #fff; }
+  .now-price { font-size: 2.4rem; font-weight: 700; color: #fff; line-height: 1.2; margin-top: 8px; }
+  .now-price .unit { font-size: 1rem; font-weight: 400; color: #8a8f98; }
+  .now-parts { color: #8a8f98; font-size: 0.85rem; margin-bottom: 16px; }
+  .appliances { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+  .appliances th { text-align: left; color: #8a8f98; font-weight: 500; font-size: 0.78rem; padding: 6px 8px 6px 0; border-bottom: 1px solid #1e2630; }
+  .appliances td { padding: 10px 8px 10px 0; border-bottom: 1px solid #1e2630; vertical-align: top; }
+  .appliances .num { text-align: right; white-space: nowrap; }
+  .appliances .sub { display: block; color: #555; font-size: 0.75rem; }
+  .appliances .save { color: #1D9E75; font-weight: 600; }
+  .fineprint { color: #555; font-size: 0.75rem; margin-top: 12px; line-height: 1.5; }
+
   /* Stats */
   .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 20px; }
   .stat { background: #141a22; border: 1px solid #1e2630; border-radius: 12px; padding: 18px; text-align: center; }
@@ -82,6 +99,9 @@
     .stat-value { font-size: 1.1rem; }
     .stat-label { font-size: 0.7rem; }
     .chart-container { height: 220px; }
+    .now-price { font-size: 1.9rem; }
+    .appliances { font-size: 0.82rem; }
+    .appliances .sub { font-size: 0.7rem; }
     .links { flex-direction: column; align-items: stretch; }
     .links a { text-align: center; padding: 12px; font-size: 0.9rem; }
     .footer { font-size: 0.72rem; }
@@ -111,6 +131,27 @@
         <option value="NO5">NO5 – Vestlandet</option>
       </select>
     </div>
+  </div>
+
+  <div class="card">
+    <div class="cost-head">
+      <h2>Hva koster strømmen deg nå?</h2>
+      <div class="tariff-toggle" id="tariff-toggle">
+        <button data-tariff="spot" class="active">Spotpris</button>
+        <button data-tariff="norgespris">Norgespris</button>
+      </div>
+    </div>
+    <div class="now-price"><span id="now-total">-</span> <span class="unit">kr/kWh</span></div>
+    <div class="now-parts" id="now-parts"><span class="loading">Henter priser...</span></div>
+    <p class="fineprint" id="tariff-note" style="display:none; margin: -6px 0 12px;">Med Norgespris er strømprisen fast, så bare nettleien (dag eller natt/helg) gjør tidspunktet billigere.</p>
+    <table class="appliances">
+      <thead><tr><th>Hva</th><th class="num">Nå</th><th class="num">Billigst</th><th class="num">Du sparer</th></tr></thead>
+      <tbody id="appliances"></tbody>
+    </table>
+    <p class="fineprint" id="cost-fineprint">
+      Det du faktisk betaler: strøm, mva, strømstøtte og nettleie fra Elvia (Oslo og Østlandet). Uten påslag fra strømleverandøren og faste månedsbeløp.
+      Forbruk er typiske anslag, og billigst tidspunkt gjelder frem til siste publiserte pris.
+    </p>
   </div>
 
   <div class="card">
@@ -239,6 +280,72 @@ async function loadChart() {
   }
 }
 
+// ---- Real cost now (/cost/now) ----
+let costData = null;
+let tariff = 'spot';
+const kr = (v) => v.toLocaleString('nb-NO', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+function whenLabel(iso) {
+  const d = new Date(iso);
+  const time = d.toLocaleTimeString('nb-NO', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Oslo' });
+  const day = osloDate(d);
+  if (day === today) return 'kl ' + time + ' i dag';
+  if (day === tomorrow) return 'kl ' + time + ' i morgen';
+  return 'kl ' + time + ' ' + d.toLocaleDateString('nb-NO', { weekday: 'long', timeZone: 'Europe/Oslo' });
+}
+
+function renderCost() {
+  if (!costData || !costData[tariff]) return;
+  const now = costData[tariff].now;
+  document.getElementById('now-total').textContent = kr(now.total);
+
+  const parts = tariff === 'spot'
+    ? ['Strøm ' + kr(now.energy), 'mva ' + kr(now.vat), now.support < 0 ? 'strømstøtte ' + kr(now.support) : null, 'nettleie ' + kr(now.nettleie)].filter(Boolean)
+    : ['Norgespris ' + kr(now.energy + now.vat), 'nettleie ' + kr(now.nettleie)];
+  document.getElementById('now-parts').textContent = parts.join(' · ') + ' (kr/kWh)';
+  document.getElementById('tariff-note').style.display = tariff === 'norgespris' ? 'block' : 'none';
+
+  const rows = costData[tariff].appliances.map((a) => {
+    const nowCell = a.now_cost === null ? '-' : kr(a.now_cost) + ' kr';
+    let bestCell = '-', saveCell = '-';
+    if (a.best_start) {
+      if (a.saving < 0.05) {  // under 5 øre isn't worth waiting for
+        bestCell = 'Nå';
+        saveCell = 'Nå er billigst';
+      } else {
+        bestCell = kr(a.best_cost) + ' kr<span class="sub">' + whenLabel(a.best_start) + '</span>';
+        saveCell = '<span class="save">' + kr(a.saving) + ' kr</span>';
+      }
+    }
+    return '<tr><td>' + esc(a.name) + '<span class="sub">' + esc(a.note) + '</span></td>'
+      + '<td class="num">' + nowCell + '</td><td class="num">' + bestCell + '</td><td class="num">' + saveCell + '</td></tr>';
+  });
+  document.getElementById('appliances').innerHTML = rows.join('');
+}
+
+async function loadCost() {
+  try {
+    const res = await fetch('/cost/now?area=' + getArea());
+    costData = await res.json();
+    if (!costData.spot) {
+      document.getElementById('now-parts').textContent = costData.message || 'Mangler priser akkurat nå.';
+      return;
+    }
+    renderCost();
+  } catch (e) {
+    document.getElementById('now-parts').textContent = 'Kunne ikke hente priser.';
+  }
+}
+
+document.querySelectorAll('#tariff-toggle button').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    tariff = btn.dataset.tariff;
+    document.querySelectorAll('#tariff-toggle button').forEach((b) => b.classList.toggle('active', b === btn));
+    renderCost();
+  });
+});
+
 async function loadAccuracy() {
   try {
     const res = await fetch('/accuracy?area=' + getArea());
@@ -280,7 +387,7 @@ document.getElementById('ask-input').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') askQuestion();
 });
 
-function loadAll() { loadSummary(); loadChart(); loadAccuracy(); }
+function loadAll() { loadCost(); loadSummary(); loadChart(); loadAccuracy(); }
 document.getElementById('area').addEventListener('change', loadAll);
 loadAll();
 </script>
