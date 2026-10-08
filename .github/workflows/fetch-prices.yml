@@ -2,8 +2,12 @@ name: Fetch Daily Prices
 
 on:
   schedule:
+    # GitHub runs scheduled workflows "best effort": often hours late, sometimes skipped.
+    # Several runs off the top of the hour make it more likely one lands on time.
+    # The API also fills in missing prices itself (api/refresh.py).
     - cron: '30 12 * * *'   # 13:30 winter / 14:30 summer Oslo, after day-ahead publication
-    - cron: '0 20 * * *'    # evening retry
+    - cron: '45 14 * * *'   # retry
+    - cron: '17 20 * * *'   # evening retry
   workflow_dispatch:
 
 jobs:
