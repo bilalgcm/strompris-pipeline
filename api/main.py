@@ -15,6 +15,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, Query
 from fastapi.responses import HTMLResponse
 
+from api.costs import Nettleie, norgespris_cost, spot_cost
 from api.forecasting import (
     build_feature_rows,
     forecast_hours,
@@ -145,6 +146,38 @@ def get_prices(area: str = "NO1", frm: date | None = Query(default=None, alias="
         (area, oslo_midnight(frm), oslo_midnight(to + timedelta(days=1))),
     )
     return [{"time_start": ts.isoformat(), "nok_per_kwh": float(nok)} for ts, nok in rows]
+
+
+@app.get("/cost")
+def get_cost(
+    area: str = Query(default="NO1", pattern="^NO[1-5]$"),
+    markup: float = Query(default=0.0, ge=-0.5, le=2.0, description="Supplier markup, kr/kWh excl. VAT"),
+    nettleie_day: float | None = Query(default=None, ge=0, le=3, description="Own energiledd, day, kr/kWh incl. VAT"),
+    nettleie_night: float | None = Query(default=None, ge=0, le=3, description="Own energiledd, night/weekend"),
+):
+    """What a household actually pays per kWh, hour by hour, today and tomorrow (see api/costs.py).
+
+    Defaults to Elvia's 2026 tariff and no supplier markup.
+    """
+    if nettleie_day is not None or nettleie_night is not None:
+        nettleie = Nettleie(
+            day=nettleie_day if nettleie_day is not None else nettleie_night,
+            night=nettleie_night if nettleie_night is not None else nettleie_day,
+            name="egendefinert",
+        )
+    else:
+        nettleie = Nettleie()
+
+    today = oslo_today()
+    hours = []
+    for p in get_prices(area=area, frm=today, to=today + timedelta(days=1)):
+        ts = datetime.fromisoformat(p["time_start"])
+        hours.append({
+            "time_start": p["time_start"],
+            "spot": spot_cost(p["nok_per_kwh"], ts, area, markup, nettleie).as_dict(),
+            "norgespris": norgespris_cost(ts, area, markup, nettleie).as_dict(),
+        })
+    return {"area": area, "markup": markup, "nettleie": nettleie.name, "hours": hours}
 
 
 @app.get("/stats")
