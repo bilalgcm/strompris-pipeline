@@ -9,13 +9,27 @@ FEATURES = [
     "prev_day_mean", "prev_day_min", "prev_day_max", "prev_day_last",
 ]
 TARGET = "price"
-MODEL_PATH = "model/model.joblib"
+
+# The shared model is trained on NO1 and serves every area without its own model.
+# Areas in ZONE_MODELS get a model trained on their own history (see the backtest, Oct 2026).
+# Must match api/forecasting.py ZONE_MODELS.
+SHARED_AREA = "NO1"
+ZONE_MODELS = ("NO2", "NO4")
+
+
+def model_path(area: str) -> str:
+    return "model/model.joblib" if area == SHARED_AREA else f"model/model_{area}.joblib"
+
+
+def train_and_save(area: str) -> None:
+    df = build_features(area)
+    model = HistGradientBoostingRegressor(random_state=0).fit(df[FEATURES], df[TARGET])
+    path = model_path(area)
+    joblib.dump(model, path)
+    print(f"{area}: trent paa {len(df)} rader ({df['time_start'].min():%Y-%m-%d} til "
+          f"{df['time_start'].max():%Y-%m-%d}), {len(FEATURES)} features, lagret til {path}")
 
 
 if __name__ == "__main__":
-    df = build_features()
-    model = HistGradientBoostingRegressor(random_state=0)
-    model.fit(df[FEATURES], df[TARGET])
-    joblib.dump(model, MODEL_PATH)
-    print(f"Modell trent paa {len(df)} rader ({df['time_start'].min():%Y-%m-%d} til {df['time_start'].max():%Y-%m-%d}), "
-          f"{len(FEATURES)} features, lagret til {MODEL_PATH}")
+    for area in (SHARED_AREA, *ZONE_MODELS):
+        train_and_save(area)

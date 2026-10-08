@@ -29,6 +29,7 @@ from api.forecasting import (
     FEATURES,
     build_feature_rows,
     forecast_hours,
+    model_path,
     oslo_midnight,
     oslo_today,
 )
@@ -45,7 +46,8 @@ DB_CONN = os.environ.get(
 OSLO = ZoneInfo("Europe/Oslo")
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("strompris")
-MODEL = joblib.load("model/model.joblib")
+# Every model file is loaded once at startup; model_path() picks one per area.
+MODELS = {path: joblib.load(path) for path in {model_path(a) for a in AREAS}}
 LLM = anthropic.Anthropic()
 
 LANDING_HTML = Path("api/landing.html").read_text()
@@ -342,7 +344,7 @@ def _compute_forecast(area):
 
     hours = forecast_hours(latest)
     features = pd.DataFrame(build_feature_rows(hours, known_prices, known_temps), dtype=float)
-    preds = MODEL.predict(features[FEATURES])
+    preds = MODELS[model_path(area)].predict(features[FEATURES])
     return [
         {"time_start": t.isoformat(), "forecast_nok_per_kwh": round(float(p), 4)}
         for t, p in zip(hours, preds)

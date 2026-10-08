@@ -16,6 +16,18 @@ FEATURES = [
 ]
 MIN_HOURS_PER_DAY = 23  # same rule as model/features.py: fewer hours = incomplete day
 
+# Areas with their own model. Chosen by the Oct 2026 backtest with a rule fixed in advance:
+# own model only if it beats the shared NO1-trained model by 5 % or more over 12 months.
+# NO2: 17.2 vs 18.2 oere, NO4: 14.6 vs 16.9. (NO3 was 15 % worse with its own model.)
+# Must match model/save_model.py ZONE_MODELS (checked by tests/test_model_artifact.py).
+ZONE_MODELS = ("NO2", "NO4")
+SHARED_MODEL = "model/model.joblib"
+
+
+def model_path(area: str) -> str:
+    """Which model file serves an area: its own if it has one, otherwise the shared model."""
+    return f"model/model_{area}.joblib" if area in ZONE_MODELS else SHARED_MODEL
+
 
 def oslo_today(now: datetime | None = None) -> date:
     """Today's date in Oslo. date.today() on Fly is UTC, which is wrong 00:00-02:00 Oslo time."""

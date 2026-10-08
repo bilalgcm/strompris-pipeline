@@ -13,17 +13,38 @@ import pytest
 import save_model
 from features import add_features
 
-from api.forecasting import FEATURES, build_feature_rows
+from api.forecasting import FEATURES, ZONE_MODELS, build_feature_rows, model_path
 
-MODEL_PATH = Path(__file__).resolve().parent.parent / "model" / "model.joblib"
+ROOT = Path(__file__).resolve().parent.parent
+ALL_AREAS = ["NO1", "NO2", "NO3", "NO4", "NO5"]
 
 
 def test_training_and_serving_use_the_same_feature_list():
     assert save_model.FEATURES == FEATURES
 
 
-def test_saved_model_was_trained_on_these_features():
-    model = joblib.load(MODEL_PATH)
+def test_training_and_serving_agree_on_which_areas_have_their_own_model():
+    assert tuple(save_model.ZONE_MODELS) == ZONE_MODELS
+
+
+@pytest.mark.parametrize("area", ALL_AREAS)
+def test_training_and_serving_agree_on_model_files(area):
+    # save_model only writes files for the shared area and ZONE_MODELS; every area must map to one of them
+    trained = {save_model.model_path(a) for a in (save_model.SHARED_AREA, *save_model.ZONE_MODELS)}
+    assert model_path(area) in trained
+
+
+def test_model_routing():
+    assert model_path("NO1") == "model/model.joblib"
+    assert model_path("NO2") == "model/model_NO2.joblib"
+    assert model_path("NO3") == "model/model.joblib"
+    assert model_path("NO4") == "model/model_NO4.joblib"
+    assert model_path("NO5") == "model/model.joblib"
+
+
+@pytest.mark.parametrize("path", sorted({model_path(a) for a in ALL_AREAS}))
+def test_every_saved_model_exists_and_uses_these_features(path):
+    model = joblib.load(ROOT / path)
     assert list(model.feature_names_in_) == FEATURES
 
 
