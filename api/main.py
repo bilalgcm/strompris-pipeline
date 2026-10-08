@@ -32,7 +32,7 @@ from api.forecasting import (
     oslo_today,
 )
 from api.freshness import AREAS, find_stale_areas
-from api.prompts import price_context
+from api.prompts import price_context, price_facts
 from api.refresh import UPSERT_SQL, PriceRefresher, fetch_day
 
 load_dotenv()
@@ -350,19 +350,25 @@ def _compute_forecast(area):
 
 
 @app.get("/ask")
-def ask_question(q: str, area: str = "NO1"):
+def ask_question(q: str = Query(min_length=1, max_length=300), area: str = AREA):
     """Answer a freeform question using real price data."""
     today = oslo_today()
     actual = get_prices(area=area, frm=today, to=today + timedelta(days=1))
+    real = [(ts, spot.total) for ts, spot, _ in _cost_hours(area, 0.0, Nettleie())]
+    facts = price_facts(today, actual, real)
     context = price_context(today, actual, forecast(area=area))
 
-    prompt = f"""Prisdata for {area}:
+    prompt = f"""Prisdata for {area}.
 
+FAKTA (regnet ut paa forhaand, bruk disse tallene):
+{facts}
+
+Timepriser (spotpris eks. mva):
 {context}
 
 Spoersmaal fra bruker: {q}
 
-Svar kort og nyttig paa norsk (maks 3-4 setninger). Hvis spoersmaalet handler om stroemforbruk, estimer wattforbruk for apparatet, regn ut kWh, og bruk faktiske timepriser fra dataen over til aa gi et konkret kostnadsestimat i kroner. Hvis spoersmaalet ikke handler om stroem, si hoeflig at du kun kan svare paa stroemrelaterte spoersmaal."""
+Svar kort og nyttig paa norsk (maks 3-4 setninger). Hvis spoersmaalet handler om stroemforbruk, estimer wattforbruk for apparatet, regn ut kWh, og bruk faktiske timepriser fra dataen over til aa gi et konkret kostnadsestimat i kroner. Bruk det husholdningen faktisk betaler (fra FAKTA) naar du regner kroner, ikke bare spotprisen. Ingen overskrifter. Hvis spoersmaalet ikke handler om stroem, si hoeflig at du kun kan svare paa stroemrelaterte spoersmaal."""
 
     response = LLM.messages.create(
         model="claude-haiku-4-5-20251001",
@@ -421,13 +427,24 @@ def daily_summary(area: str = "NO1"):
 def _compute_summary(area):
     today = oslo_today()
     actual = get_prices(area=area, frm=today, to=today + timedelta(days=1))
+    real = [(ts, spot.total) for ts, spot, _ in _cost_hours(area, 0.0, Nettleie())]
+    facts = price_facts(today, actual, real)
     context = price_context(today, actual, forecast(area=area))
 
-    prompt = f"""Her er stroemprisene for prisomraade {area}.
+    prompt = f"""Stroemprisene for prisomraade {area}.
 
+FAKTA (regnet ut paa forhaand, bruk disse tallene, ikke regn selv):
+{facts}
+
+Timepriser til bakgrunn:
 {context}
 
-Gi en kort, nyttig oppsummering paa norsk (3-5 setninger). Si naar stroemmen er billigst og dyrest i dag og i morgen. Bruk faktiske priser naar de finnes, og si tydelig fra naar du bygger paa prognosen. Gi et konkret tips om naar det loenner seg aa bruke stroem (f.eks. vaskemaskin, oppvaskmaskin)."""
+Skriv en kort, nyttig oppsummering paa norsk (3-5 setninger):
+- Si naar stroemmen er billigst og dyrest i dag og i morgen, med tallene fra FAKTA.
+- Naar du snakker om hva man sparer, bruk det husholdningen faktisk betaler fra FAKTA, ikke spotprisen.
+- Si tydelig fra hvis du bygger paa prognosen.
+- Gi ett konkret tips (f.eks. vaskemaskin, oppvaskmaskin, elbil).
+- Ingen overskrifter og ingen punktlister. Vanlig tekst, gjerne med **fet skrift** for "I dag" og "I morgen"."""
 
     response = LLM.messages.create(
         model="claude-haiku-4-5-20251001",
