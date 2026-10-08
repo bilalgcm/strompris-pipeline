@@ -25,10 +25,13 @@ cd ingest && python profile_check.py NO1 2026-09 1.32   # household profile vs. 
 # Migrations (from repo ROOT, uses DATABASE_URL)
 python db/migrate.py up 001                # and: down 001
 
-# Model — MUST run from inside model/
-cd model && python baseline.py             # print naive-baseline MAE the model must beat
-cd model && python train.py                # compare baseline vs with/without weather (eval only, no save)
-cd model && python save_model.py           # retrain on all data + write model/model.joblib
+# Model — run from the repo ROOT as `python model/<script>.py` (Python puts model/ on the path,
+# so the flat imports work, and save_model.py's relative path model/model.joblib resolves correctly)
+python model/baseline.py                   # print naive-baseline MAE the model must beat
+python model/train.py                      # compare baseline vs with/without weather (eval only, no save)
+python model/save_model.py                 # retrain on all data + write model/model.joblib
+python model/export_data.py                # read-only export of prices + weather to model/data/*.parquet (gitignored)
+python model/backtest.py [months]          # monthly walk-forward backtest, all zones, from the exported files
 
 # API (run from repo ROOT — loads model/model.joblib and api/landing.html by relative path)
 python -m uvicorn api.main:app --reload    # http://127.0.0.1:8000  (/docs for OpenAPI)
@@ -45,7 +48,7 @@ CI (`.github/workflows/ci.yml`) runs `ruff check .`, `pytest`, then a Docker bui
 
 ## Working directory matters
 
-Scripts in `ingest/` and `model/` use **flat imports** (`from store import save_prices`, `from features import build_features`, `from baseline import ...`) rather than package imports. They only resolve when the current directory is that folder — always `cd ingest` / `cd model` first. The API, by contrast, must run from the repo root because `api/main.py` reads `model/model.joblib` and `api/landing.html` via root-relative paths.
+Scripts in `ingest/` and `model/` use **flat imports** (`from store import save_prices`, `from features import build_features`, `from baseline import ...`) rather than package imports. Ingest scripts are run with `cd ingest` first; model scripts are run from the root as `python model/<script>.py`. `tests/conftest.py` puts `model/` on the path so tests can import them the same way. The API, by contrast, must run from the repo root because `api/main.py` reads `model/model.joblib` and `api/landing.html` via root-relative paths.
 
 ## Database
 
@@ -71,7 +74,7 @@ Original tables:
 ```
 
 is **duplicated** in `model/save_model.py`, `model/train.py`, and `api/main.py` — keep all three in sync when changing features. Features are built two different ways that must agree:
-- **Training** (`model/features.py`): a SQL join of `prices` + `weather` on `time_start`, then pandas lag/calendar columns, converting UTC → `Europe/Oslo` for calendar fields.
+- **Training** (`model/features.py`): `add_features` (pure, used by training and the backtest) joins prices and weather on `time_start`, adds calendar fields in `Europe/Oslo`, and looks lags up **by timestamp** (t - 24h, t - 168h), so gaps in the data can't shift them.
 - **Serving** (`api/main.py::_compute_forecast` + `api/forecasting.py`): reconstructs the same 8 features per future hour in Python, pulling recent prices/temps from the DB and future temps live from Open-Meteo. The forecast window starts after the newest stored price and runs to the end of the next Oslo day (`forecast_hours`), so it never covers hours whose real price is already published: before ~13:00 that is tomorrow, after publication the day after tomorrow.
 
 The model is **trained on NO1 only** but served for every zone via `?area=NO1..NO5`. The train/test split cutoff lives in `model/baseline.py` (`CUTOFF`).
