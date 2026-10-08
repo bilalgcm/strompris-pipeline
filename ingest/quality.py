@@ -74,6 +74,17 @@ def check_day(day: date, rows: list[tuple[datetime, float | None]]) -> list[str]
     return problems
 
 
+def check_weather(latest: datetime | None, today: date) -> list[str]:
+    """Weather must cover all of yesterday (Oslo). The model uses temperature, and this
+    failed silently for 2.5 months in 2026 before this check existed."""
+    if latest is None:
+        return ["no weather rows"]
+    _, yesterday_end = day_bounds(today - timedelta(days=1))
+    if latest < yesterday_end - timedelta(hours=1):
+        return [f"weather ends {latest.astimezone(OSLO):%Y-%m-%d %H:%M}, expected through yesterday 23:00"]
+    return []
+
+
 def main() -> int:
     import psycopg  # imported here so the tests don't need a database driver
 
@@ -94,6 +105,11 @@ def main() -> int:
                 status = "OK" if not problems else "FEIL: " + "; ".join(problems)
                 print(f"{area} {day}: {status}")
                 failures += bool(problems)
+
+        cur.execute("SELECT max(time_start) FROM weather WHERE location = 'oslo';")
+        problems = check_weather(cur.fetchone()[0], today)
+        print(f"Vaer oslo: {'OK' if not problems else 'FEIL: ' + '; '.join(problems)}")
+        failures += bool(problems)
 
     return 1 if failures else 0
 

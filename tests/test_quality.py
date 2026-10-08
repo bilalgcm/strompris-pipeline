@@ -1,6 +1,6 @@
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 
-from ingest.quality import check_day, day_bounds, days_to_check
+from ingest.quality import check_day, check_weather, day_bounds, days_to_check
 
 DAY = date(2026, 10, 8)
 
@@ -64,3 +64,19 @@ def test_negative_prices_are_allowed():
 def test_days_to_check():
     assert days_to_check(DAY, check_tomorrow=False) == [DAY]
     assert days_to_check(DAY, check_tomorrow=True) == [DAY, date(2026, 10, 9)]
+
+
+# --- weather ---------------------------------------------------------------
+
+def test_weather_ok_when_yesterday_is_covered():
+    # Yesterday (7 Oct) ends 23:00 Oslo = 21:00 UTC
+    assert check_weather(datetime(2026, 10, 7, 21, tzinfo=UTC), DAY) == []
+
+
+def test_weather_stale_like_july_2026():
+    problems = check_weather(datetime(2026, 7, 24, 0, tzinfo=UTC), DAY)
+    assert problems and "2026-07-24" in problems[0]
+
+
+def test_weather_missing_entirely():
+    assert check_weather(None, DAY) == ["no weather rows"]

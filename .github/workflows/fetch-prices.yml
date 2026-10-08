@@ -27,7 +27,7 @@ jobs:
           from datetime import date, timedelta
           from fetch_prices import fetch_prices
           from store import save_prices
-          from fetch_weather import fetch_weather, save_weather
+          from fetch_weather import fetch_recent_weather, save_weather
 
           for area in ['NO1', 'NO2', 'NO3', 'NO4', 'NO5']:
               for d in [date.today(), date.today() + timedelta(days=1)]:
@@ -38,10 +38,11 @@ jobs:
                   except Exception as e:
                       print(f'Prices {area} {d}: hoppet over ({e})')
 
-          start = (date.today() - timedelta(days=3)).isoformat()
-          end = (date.today() + timedelta(days=1)).isoformat()
+          # Forecast API with past_days, not the archive: the archive rejects recent end dates
+          # with 400, which stopped the weather data from 24 July 2026 without failing the run.
+          # A failure here is now caught by the weather check in quality.py.
           try:
-              times, temps = fetch_weather(start, end)
+              times, temps = fetch_recent_weather(past_days=7)
               saved = save_weather(times, temps)
               print(f'Weather: {saved} timer lagret')
           except Exception as e:
