@@ -2,7 +2,14 @@
 
 import pandas as pd
 import pytest
-from backtest import data_coverage, last_complete_months, mae_table, mark_evening_drop
+from backtest import (
+    data_coverage,
+    interval_table,
+    last_complete_months,
+    mae_table,
+    mark_evening_drop,
+    pinball,
+)
 from features import add_features, add_previous_day
 
 
@@ -108,3 +115,29 @@ def test_spring_dst_day_with_23_hours_counts_as_complete():
     df = hourly("2026-03-29", [1.0] * (23 + 24), tz="Europe/Oslo")  # 29 March has 23 hours
     out = add_previous_day(df.copy())
     assert out["prev_day_mean"].iloc[23:].notna().all()
+
+
+# --- prediction intervals --------------------------------------------------
+
+def test_pinball_loss_by_hand():
+    # q = 0.1. Real 1.0, forecast 0.8: under-forecast costs 0.1 * 0.2 = 0.02.
+    # Real 1.0, forecast 1.2: over-forecast costs 0.9 * 0.2 = 0.18. Mean 0.10 kr = 10 oere.
+    y = pd.Series([1.0, 1.0])
+    f = pd.Series([0.8, 1.2])
+    assert pinball(y, f, 0.1) == pytest.approx(10.0)
+
+
+def test_interval_table():
+    results = pd.DataFrame({
+        "area": ["NO1"] * 4,
+        "price":    [1.0, 1.0, 1.0, 1.0],
+        "low_raw":  [0.9, 0.9, 1.1, 1.2],
+        "high_raw": [1.1, 1.3, 1.3, 0.8],   # last one crossed: low above high
+    })
+    results["low"] = results[["low_raw", "high_raw"]].min(axis=1)
+    results["high"] = results[["low_raw", "high_raw"]].max(axis=1)
+    row = interval_table(results, "area").loc["NO1"]
+    # Inside: rows 1, 2 and 4 (0.8-1.2 after swapping). Row 3 starts above the price.
+    assert row["coverage_pct"] == 75.0
+    assert row["width_ore"] == pytest.approx((20 + 40 + 20 + 40) / 4)
+    assert row["crossed_pct"] == 25.0

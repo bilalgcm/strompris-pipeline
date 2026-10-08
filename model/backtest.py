@@ -11,7 +11,9 @@ Compared side by side:
     naive_168h    same price as the same hour last week
     model_no1     the old live setup (until Oct 2026): 8 features, trained on NO1, used everywhere
     model_v2      the live setup since Oct 2026: plus a summary of the previous day, trained on NO1
-    model_v2_zone the candidate: same features as model_v2, but one model per area
+    model_v2_zone same features as model_v2, but one model per area (live for ZONE_MODELS since Oct 2026)
+    low / high    80 % prediction interval from quantile models (10th and 90th percentile),
+                  using the live routing. Scored on coverage, width and pinball loss.
 
 Usage (from the repo root, after `python model/export_data.py`):
     python model/backtest.py            # last 12 months
@@ -23,8 +25,10 @@ Prints summary tables and writes every forecast to model/data/backtest.csv.
 import sys
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 from features import add_features
+from save_model import ZONE_MODELS
 from sklearn.ensemble import HistGradientBoostingRegressor
 
 DATA_DIR = Path(__file__).parent / "data"
@@ -34,6 +38,7 @@ FEATURES_V2 = FEATURES + ["prev_day_mean", "prev_day_min", "prev_day_max", "prev
 AREAS = ["NO1", "NO2", "NO3", "NO4", "NO5"]
 METHODS = ["naive_24h", "naive_168h", "model_no1", "model_v2", "model_v2_zone"]
 EVENING_DROP = 0.30  # previous day's 23:00 price at least 30 % below its daily mean
+Q_LOW, Q_HIGH = 0.10, 0.90  # 80 % prediction interval
 MIN_TRAIN_HOURS = 24 * 90  # don't train a per-area model on less than ~3 months of history
 
 
@@ -82,8 +87,36 @@ def mark_evening_drop(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def fit(train: pd.DataFrame, features: list[str] = FEATURES) -> HistGradientBoostingRegressor:
-    return HistGradientBoostingRegressor(random_state=0).fit(train[features], train["price"])
+def fit(train: pd.DataFrame, features: list[str] = FEATURES, quantile: float | None = None) -> HistGradientBoostingRegressor:
+    """Mean-error model by default; with `quantile`, a model for that percentile (e.g. 0.1)."""
+    kwargs = {"loss": "quantile", "quantile": quantile} if quantile is not None else {}
+    return HistGradientBoostingRegressor(random_state=0, **kwargs).fit(train[features], train["price"])
+
+
+def pinball(y: pd.Series, f: pd.Series, q: float) -> float:
+    """Standard score for a quantile forecast (lower is better), in oere/kWh."""
+    diff = y - f
+    return float(np.maximum(q * diff, (q - 1) * diff).mean() * 100)
+
+
+def interval_table(results: pd.DataFrame, by: str) -> pd.DataFrame:
+    """How honest and how useful the 80 % interval is, per group.
+
+    coverage_pct  share of real prices inside [low, high]; should be close to 80
+    width_ore     average width of the interval; narrower is more useful
+    pinball_*     quantile scores for the low and high edge; lower is better
+    crossed_pct   hours where the raw low edge came out above the high edge (they get swapped)
+    """
+    rows = {}
+    for key, g in results.groupby(by):
+        rows[key] = {
+            "coverage_pct": ((g["price"] >= g["low"]) & (g["price"] <= g["high"])).mean() * 100,
+            "width_ore": (g["high"] - g["low"]).mean() * 100,
+            "pinball_low": pinball(g["price"], g["low_raw"], Q_LOW),
+            "pinball_high": pinball(g["price"], g["high_raw"], Q_HIGH),
+            "crossed_pct": (g["low_raw"] > g["high_raw"]).mean() * 100,
+        }
+    return pd.DataFrame(rows).T.round(1)
 
 
 def run(prices: pd.DataFrame, weather: pd.DataFrame, n_months: int) -> pd.DataFrame:
@@ -97,6 +130,9 @@ def run(prices: pd.DataFrame, weather: pd.DataFrame, n_months: int) -> pd.DataFr
         no1 = by_area["NO1"]
         model_no1 = fit(no1[no1["time_start"] < start])
         model_v2 = fit(no1[no1["time_start"] < start], FEATURES_V2)
+        # Interval models follow the live routing: own models for ZONE_MODELS, the shared NO1 model for the rest
+        shared_low = fit(no1[no1["time_start"] < start], FEATURES_V2, Q_LOW)
+        shared_high = fit(no1[no1["time_start"] < start], FEATURES_V2, Q_HIGH)
         for area, df in by_area.items():
             train = df[df["time_start"] < start]
             test = df[(df["time_start"] >= start) & (df["time_start"] < end)].copy()
@@ -115,6 +151,14 @@ def run(prices: pd.DataFrame, weather: pd.DataFrame, n_months: int) -> pd.DataFr
             # For NO1 the per-zone model is the same model, so reuse its forecast
             test["model_v2_zone"] = (test["model_v2"] if area == "NO1"
                                      else fit(train, FEATURES_V2).predict(test[FEATURES_V2]))
+            if area in ZONE_MODELS:
+                low_model, high_model = fit(train, FEATURES_V2, Q_LOW), fit(train, FEATURES_V2, Q_HIGH)
+            else:
+                low_model, high_model = shared_low, shared_high
+            test["low_raw"] = low_model.predict(test[FEATURES_V2])
+            test["high_raw"] = high_model.predict(test[FEATURES_V2])
+            test["low"] = test[["low_raw", "high_raw"]].min(axis=1)
+            test["high"] = test[["low_raw", "high_raw"]].max(axis=1)
             results.append(test)
         print(f"  {start:%Y-%m} ferdig")
 
@@ -162,8 +206,14 @@ def main() -> None:
     print("Skjevhet (positiv = for hoyt):");  print(bias_table(early, "evening_drop_before").to_string())
     print(f"Timer med kveldsfall dagen foer: {early['evening_drop_before'].sum()} av {len(early)}")
 
+    print(f"\n{int((Q_HIGH - Q_LOW) * 100)} % prediksjonsintervall per prisomraade (dekning boer vaere naer 80):")
+    print(interval_table(results, "area").to_string())
+    print("\nPer maaned, alle omraader:")
+    print(interval_table(results, "test_month").to_string())
+
     out = DATA_DIR / "backtest.csv"
-    results[["time_start", "area", "test_month", "price", *METHODS, "evening_drop_before"]].to_csv(out, index=False)
+    results[["time_start", "area", "test_month", "price", *METHODS, "low", "high", "evening_drop_before"]].to_csv(
+        out, index=False)
     print(f"\nAlle prognoser lagret i {out}")
 
 
