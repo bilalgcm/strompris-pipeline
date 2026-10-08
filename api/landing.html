@@ -155,7 +155,11 @@
 
 <script>
 let priceChart = null;
-const today = new Date().toISOString().slice(0, 10);
+// Dates in Oslo time ('sv-SE' formats as YYYY-MM-DD). toISOString() would give the UTC date.
+const osloDate = (d) => d.toLocaleDateString('sv-SE', { timeZone: 'Europe/Oslo' });
+const today = osloDate(new Date());
+// Add a day at noon UTC, so DST days (23 or 25 hours) can't skip or repeat a date
+const tomorrow = new Date(Date.parse(today + 'T12:00:00Z') + 24 * 3600 * 1000).toISOString().slice(0, 10);
 
 function getArea() { return document.getElementById('area').value; }
 
@@ -174,7 +178,7 @@ async function loadSummary() {
 async function loadChart() {
   try {
     const [pricesRes, forecastRes] = await Promise.all([
-      fetch(`/prices?from=${today}&to=${today}&area=${getArea()}`),
+      fetch(`/prices?from=${today}&to=${tomorrow}&area=${getArea()}`),
       fetch('/forecast?area=' + getArea())
     ]);
     const prices = await pricesRes.json();
@@ -190,11 +194,18 @@ async function loadChart() {
     const actualData = prices.map(p => p.nok_per_kwh);
     const forecastData = new Array(prices.length).fill(null).concat(forecast.map(p => p.forecast_nok_per_kwh));
 
-    if (actualData.length > 0) {
-      const avg = actualData.reduce((a, b) => a + b, 0) / actualData.length;
+    // Name the forecast day(s), e.g. "Prognose for lørdag 10. oktober"
+    const dayName = (iso) => new Date(iso).toLocaleDateString('nb-NO', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'Europe/Oslo' });
+    const forecastDays = [...new Set(forecast.map(p => dayName(p.time_start)))];
+    const forecastLabel = forecastDays.length ? 'Prognose for ' + forecastDays.join(' og ') : 'Prognose';
+
+    // Stats are for today only, even when tomorrow's prices are shown in the chart
+    const todayPrices = prices.filter(p => osloDate(new Date(p.time_start)) === today).map(p => p.nok_per_kwh);
+    if (todayPrices.length > 0) {
+      const avg = todayPrices.reduce((a, b) => a + b, 0) / todayPrices.length;
       document.getElementById('stat-avg').textContent = avg.toFixed(2) + ' kr';
-      document.getElementById('stat-min').textContent = Math.min(...actualData).toFixed(2) + ' kr';
-      document.getElementById('stat-max').textContent = Math.max(...actualData).toFixed(2) + ' kr';
+      document.getElementById('stat-min').textContent = Math.min(...todayPrices).toFixed(2) + ' kr';
+      document.getElementById('stat-max').textContent = Math.max(...todayPrices).toFixed(2) + ' kr';
     } else {
       ['stat-avg', 'stat-min', 'stat-max'].forEach(id => document.getElementById(id).textContent = '-');
     }
@@ -206,7 +217,7 @@ async function loadChart() {
         labels: allLabels,
         datasets: [
           { label: 'Faktisk', data: actualData.concat(new Array(forecast.length).fill(null)), borderColor: '#1D9E75', backgroundColor: 'rgba(29,158,117,0.1)', fill: true, tension: 0.3, pointRadius: 0 },
-          { label: 'Prognose', data: forecastData, borderColor: '#D85A30', borderDash: [6, 3], backgroundColor: 'rgba(216,90,48,0.1)', fill: true, tension: 0.3, pointRadius: 0 }
+          { label: forecastLabel, data: forecastData, borderColor: '#D85A30', borderDash: [6, 3], backgroundColor: 'rgba(216,90,48,0.1)', fill: true, tension: 0.3, pointRadius: 0 }
         ]
       },
       options: {
