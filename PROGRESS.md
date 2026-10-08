@@ -36,14 +36,14 @@ Live at [strompris-pipeline.fly.dev](https://strompris-pipeline.fly.dev/). Price
 - Own models for NO2 and NO4, chosen by a rule fixed before looking at the results
 - 80 % prediction intervals from quantile models, calibrated with split conformal prediction: 78 to 80 % coverage in every area
 - Guard tests keep the feature list, the training script and the saved models in sync
+- MCP server (`mcp_server/`): five tools over the public API for Claude Desktop, Claude Code and other agents
 - Monthly retrain job: retrains models and calibration, reports last month's live performance, opens a pull request for review
 
 ## Next
 
 1. **Elhub file upload** for the Norgespris comparison, so people can use their own hourly consumption instead of a typical profile. Waiting for a real sample file to build the parser against.
-2. **MCP server** exposing prices, real costs and the forecast to AI agents.
-3. **Markup input on the "nå" card**, and more grid companies than Elvia.
-4. **Recheck the household profile against a winter invoice.** September was a weak test because prices and usage weren't strongly correlated that month.
+2. **Markup input on the "nå" card**, and more grid companies than Elvia.
+3. **Recheck the household profile against a winter invoice.** September was a weak test because prices and usage weren't strongly correlated that month.
 
 ## Known limitations
 

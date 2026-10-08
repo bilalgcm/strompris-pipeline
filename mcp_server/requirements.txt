@@ -1,0 +1,2 @@
+# Only for the MCP server; the API doesn't need it.
+mcp==2.3.0

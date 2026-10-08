@@ -77,7 +77,7 @@ hvakosterstrommen.no     Open-Meteo        Elhub open data
 
 **Backend:** Python, FastAPI, PostgreSQL (Neon), psycopg
 **ML:** scikit-learn (HistGradientBoostingRegressor, quantile loss), pandas, split conformal calibration
-**AI:** Anthropic Claude Haiku
+**AI:** Anthropic Claude Haiku, Model Context Protocol (MCP) server
 **Data:** hvakosterstrommen.no, Open-Meteo, Elhub open data
 **Infrastructure:** Docker, GitHub Actions (CI, deploy, scheduled ingestion), Fly.io
 **Frontend:** Vanilla HTML and JavaScript, Chart.js
@@ -101,6 +101,10 @@ hvakosterstrommen.no     Open-Meteo        Elhub open data
 | `/accuracy` | Stored forecasts compared with actual prices |
 
 All endpoints take `?area=NO1` to `?area=NO5`.
+
+## Use it from Claude (MCP)
+
+`mcp_server/` is a small [MCP](https://modelcontextprotocol.io) server that exposes the platform as tools for Claude Desktop, Claude Code or any MCP client: prices, the real cost right now, the forecast with its interval, the cheapest hours to run something, and the spot vs. Norgespris comparison. Ask *"When should I charge my car tonight in NO1?"* and Claude answers from live data. Setup in [mcp_server/README.md](mcp_server/README.md).
 
 ## Run it locally
 

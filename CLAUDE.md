@@ -46,7 +46,7 @@ ruff check .
 python -m pytest -q
 ```
 
-CI (`.github/workflows/ci.yml`) runs `ruff check .`, `pytest`, then a Docker build on every push/PR to `main`. Tests live in `tests/` and cover the pure logic (`api/freshness.py`, `api/refresh.py`, `api/forecasting.py`, `api/prompts.py`, `api/costs.py`, `api/holidays.py`, `api/appliances.py`, `api/comparison.py`, `ingest/quality.py`, `ingest/fetch_household.py`); they need no database, model or API key.
+CI (`.github/workflows/ci.yml`) runs `ruff check .`, `pytest`, then a Docker build on every push/PR to `main`. Tests live in `tests/` and cover the pure logic (`api/freshness.py`, `api/refresh.py`, `api/forecasting.py`, `api/prompts.py`, `api/costs.py`, `api/holidays.py`, `api/appliances.py`, `api/comparison.py`, `ingest/quality.py`, `ingest/fetch_household.py`, `mcp_server/server.py` with a fake API); they need no database, model or API key.
 
 ## Working directory matters
 
@@ -87,6 +87,10 @@ The shared model is trained on NO1 and serves NO1, NO3 and NO5; NO2 and NO4 use 
 `.github/workflows/fetch-prices.yml` (cron 12:30, 14:45 and 20:17 UTC, or manual `workflow_dispatch`) runs the whole update as inline `python -c` scripts against Neon: fetch today+tomorrow prices for all five zones, refresh the last few days of weather, then **save forecasts by HTTP-calling the live `https://strompris-pipeline.fly.dev/forecast` endpoint** (not by importing the model). The `/accuracy` endpoint later joins those stored `forecasts` against actual `prices`. Then `ingest/quality.py` fails the run if stored prices are missing or invalid (the 12:30 run checks only today), or if Oslo weather doesn't cover all of yesterday. Weather comes from Open-Meteo's forecast API with `past_days=7`; the archive API rejects recent end dates with 400, which silently stopped weather updates from 24 July 2026 until this was fixed. The last step, `ingest/fetch_household.py`, re-fetches 16 days of Elhub household consumption, since Elhub corrects values for about two weeks.
 
 GitHub runs scheduled workflows best effort (often hours late, sometimes skipped), so the API also self-heals: `api/refresh.py` checks at most every 10 minutes, on requests to `/prices`, `/forecast` and `/summary`, whether today's (or after 13:00, tomorrow's) prices are missing, and fetches them from hvakosterstrommen.no in a background thread. `/health` only observes and never triggers a fetch, so it still reveals pipeline problems.
+
+## MCP server
+
+`mcp_server/server.py` (official `mcp` package 2.x, `MCPServer`) exposes five tools over stdio: `get_prices`, `get_real_cost_now`, `get_forecast`, `cheapest_hours`, `compare_spot_norgespris`. It only calls the public REST API (`STROMPRIS_API_URL`, default the live site) and imports nothing from `api/`, so it can run anywhere. Raise `ToolError` for problems the agent should see; any other exception reaches the agent only as a generic "Error executing tool". Its dependency lives in `mcp_server/requirements.txt` (CI installs it for the tests). The folder is not called `mcp/` on purpose: that would shadow the `mcp` package.
 
 ## Monthly retrain
 
