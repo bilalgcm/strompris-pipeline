@@ -2,7 +2,7 @@
 
 import pandas as pd
 import pytest
-from backtest import last_complete_months, mae_table, mark_evening_drop
+from backtest import data_coverage, last_complete_months, mae_table, mark_evening_drop
 from features import add_features
 
 
@@ -67,3 +67,12 @@ def test_mae_table_in_ore():
     })
     table = mae_table(results, "area")
     assert table.loc["NO1"].tolist() == pytest.approx([15.0, 0.0, 20.0, 5.0])
+
+
+def test_data_coverage_counts_hours_with_temperature():
+    no1 = hourly("2026-09-01", [1.0] * 48).assign(price_area="NO1")
+    no2 = hourly("2026-09-02", [1.0] * 24).assign(price_area="NO2")
+    weather = pd.DataFrame({"time_start": no1["time_start"].iloc[:30], "temperature": 5.0})
+    cov = data_coverage(pd.concat([no1, no2]), weather)
+    assert cov.loc["NO1", "hours"] == 48 and cov.loc["NO1", "hours_with_temperature"] == 30
+    assert cov.loc["NO2", "hours"] == 24 and cov.loc["NO2", "hours_with_temperature"] == 6
