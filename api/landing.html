@@ -58,6 +58,16 @@
   .appliances .save { color: #1D9E75; font-weight: 600; }
   .fineprint { color: #555; font-size: 0.75rem; margin-top: 12px; line-height: 1.5; }
 
+  /* Spot vs Norgespris */
+  .compare-form { display: grid; grid-template-columns: 1.2fr 1fr 1fr auto; gap: 10px; align-items: end; }
+  .compare-form label { display: block; color: #8a8f98; font-size: 0.78rem; margin-bottom: 4px; }
+  .compare-form select, .compare-form input { width: 100%; padding: 9px 10px; background: #0b0f14; color: #e0e0e0; border: 1px solid #2a3340; border-radius: 8px; font-size: 0.9rem; outline: none; }
+  .compare-form select:focus, .compare-form input:focus { border-color: #1D9E75; }
+  .compare-result { margin-top: 16px; display: none; }
+  .compare-headline { font-size: 1.15rem; color: #fff; font-weight: 600; line-height: 1.5; margin-bottom: 10px; }
+  .compare-rows { display: grid; grid-template-columns: 1fr auto; gap: 4px 16px; font-size: 0.9rem; color: #d0d0d0; }
+  .compare-rows .val { text-align: right; white-space: nowrap; }
+
   /* Stats */
   .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 20px; }
   .stat { background: #141a22; border: 1px solid #1e2630; border-radius: 12px; padding: 18px; text-align: center; }
@@ -100,6 +110,9 @@
     .stat-label { font-size: 0.7rem; }
     .chart-container { height: 220px; }
     .now-price { font-size: 1.9rem; }
+    .compare-form { grid-template-columns: 1fr 1fr; }
+    .compare-form .ask-btn { grid-column: 1 / -1; }
+    .compare-form select, .compare-form input { font-size: 16px; } /* prevents iOS zoom on focus */
     .appliances { font-size: 0.82rem; }
     .appliances .sub { font-size: 0.7rem; }
     .links { flex-direction: column; align-items: stretch; }
@@ -152,6 +165,25 @@
       Det du faktisk betaler: strøm, mva, strømstøtte og nettleie fra Elvia (Oslo og Østlandet). Uten påslag fra strømleverandøren og faste månedsbeløp.
       Forbruk er typiske anslag, og billigst tidspunkt gjelder frem til siste publiserte pris.
     </p>
+  </div>
+
+  <div class="card">
+    <h2>Spotpris eller Norgespris?</h2>
+    <p class="fineprint" style="margin: 0 0 14px;">Se hva en måned faktisk kostet deg på spotpris med strømstøtte, og hva Norgespris ville kostet. Tallene finner du på strømfakturaen.</p>
+    <div class="compare-form">
+      <div><label for="cmp-month">Måned</label><select id="cmp-month"></select></div>
+      <div><label for="cmp-kwh">Forbruk (kWh)</label><input id="cmp-kwh" type="text" inputmode="decimal" autocomplete="off" placeholder="f.eks. 535"></div>
+      <div><label for="cmp-paslag">Påslag (øre/kWh inkl. mva)</label><input id="cmp-paslag" type="text" inputmode="decimal" autocomplete="off" placeholder="0"></div>
+      <button class="ask-btn" id="cmp-btn" onclick="runCompare()">Sammenlign</button>
+    </div>
+    <div class="compare-result" id="cmp-result">
+      <div class="compare-headline" id="cmp-headline"></div>
+      <div class="compare-rows" id="cmp-rows"></div>
+      <p class="fineprint">
+        Strømmen din er fordelt på månedens timer etter hvordan en vanlig husholdning i ditt prisområde brukte strøm (Elhub).
+        Strømstøtten er regnet time for time. Nettleie er utelatt fordi den er lik for begge, og faste månedsbeløp er ikke med.
+      </p>
+    </div>
   </div>
 
   <div class="card">
@@ -346,6 +378,69 @@ document.querySelectorAll('#tariff-toggle button').forEach((btn) => {
   });
 });
 
+// ---- Spot vs Norgespris (/compare) ----
+// Text inputs, not type="number": Norwegians write 534,91, and number inputs reject the comma.
+const parseNumber = (text) => parseFloat(String(text).trim().replace(/\s/g, '').replace(',', '.'));
+const monthName = (m) => {
+  const [y, mo] = m.split('-').map(Number);
+  return new Date(Date.UTC(y, mo - 1, 15)).toLocaleDateString('nb-NO', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+};
+
+async function loadCompareMonths() {
+  const select = document.getElementById('cmp-month');
+  document.getElementById('cmp-result').style.display = 'none';
+  try {
+    const res = await fetch('/compare/months?area=' + getArea());
+    const data = await res.json();
+    select.innerHTML = data.months.length
+      ? data.months.map((m) => '<option value="' + esc(m) + '">' + esc(monthName(m)) + '</option>').join('')
+      : '<option value="">Ingen måneder ennå</option>';
+  } catch (e) {
+    select.innerHTML = '<option value="">Kunne ikke hente måneder</option>';
+  }
+}
+
+async function runCompare() {
+  const month = document.getElementById('cmp-month').value;
+  const kwh = parseNumber(document.getElementById('cmp-kwh').value);
+  const paslag = parseNumber(document.getElementById('cmp-paslag').value || '0');
+  const result = document.getElementById('cmp-result');
+  const headline = document.getElementById('cmp-headline');
+  const rows = document.getElementById('cmp-rows');
+  result.style.display = 'block';
+  rows.innerHTML = '';
+  if (!month || !(kwh > 0)) {
+    headline.textContent = 'Velg måned og skriv inn forbruket ditt i kWh.';
+    return;
+  }
+  headline.innerHTML = '<span class="loading">Regner...</span>';
+  try {
+    const params = new URLSearchParams({ area: getArea(), month, kwh, paslag_ore: isNaN(paslag) ? 0 : paslag });
+    const res = await fetch('/compare?' + params);
+    const d = await res.json();
+    if (!res.ok) {
+      headline.textContent = d.detail && typeof d.detail === 'string' ? d.detail : 'Sjekk tallene og prøv igjen.';
+      return;
+    }
+    const diff = d.norgespris_saves;
+    const name = monthName(d.month).split(' ')[0];
+    headline.textContent = Math.abs(diff) < 1
+      ? 'I ' + name + ' ville det blitt omtrent like dyrt.'
+      : diff > 0
+        ? 'Med Norgespris ville du betalt ' + kr(diff) + ' kr mindre i ' + name + '.'
+        : 'Spotpris var ' + kr(-diff) + ' kr billigere enn Norgespris i ' + name + '.';
+    const line = (label, value) => '<div>' + label + '</div><div class="val">' + value + '</div>';
+    rows.innerHTML = [
+      line('Spotpris, etter strømstøtte', kr(d.spot_cost) + ' kr'),
+      line('&nbsp;&nbsp;strømstøtte trukket fra', '−' + kr(d.stromstotte) + ' kr'),
+      line('Norgespris', kr(d.norgespris_cost) + ' kr'),
+      line('Snitt spotpris (eks. mva, som på fakturaen)', kr(d.avg_spot_excl_vat) + ' kr/kWh'),
+    ].join('');
+  } catch (e) {
+    headline.textContent = 'Kunne ikke regne ut. Prøv igjen.';
+  }
+}
+
 async function loadAccuracy() {
   try {
     const res = await fetch('/accuracy?area=' + getArea());
@@ -387,7 +482,7 @@ document.getElementById('ask-input').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') askQuestion();
 });
 
-function loadAll() { loadCost(); loadSummary(); loadChart(); loadAccuracy(); }
+function loadAll() { loadCost(); loadCompareMonths(); loadSummary(); loadChart(); loadAccuracy(); }
 document.getElementById('area').addEventListener('change', loadAll);
 loadAll();
 </script>
