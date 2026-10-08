@@ -1,8 +1,10 @@
 """Tests for the pure parts of model/: feature building and backtest helpers."""
 
+import numpy as np
 import pandas as pd
 import pytest
 from backtest import (
+    conformal_offset,
     data_coverage,
     interval_table,
     last_complete_months,
@@ -141,3 +143,28 @@ def test_interval_table():
     assert row["coverage_pct"] == 75.0
     assert row["width_ore"] == pytest.approx((20 + 40 + 20 + 40) / 4)
     assert row["crossed_pct"] == 25.0
+
+
+def test_conformal_offset_by_hand():
+    # Three prices inside a +-0.1 band (score -0.1), one 0.05 above it (score +0.05).
+    # n = 4, k = ceil(5 * 0.8) = 4 -> the 4th smallest score: widen by 0.05.
+    y = pd.Series([1.0, 1.0, 1.0, 1.0])
+    low = pd.Series([0.9, 0.9, 0.9, 0.85])
+    high = pd.Series([1.1, 1.1, 1.1, 0.95])
+    assert conformal_offset(y, low, high) == pytest.approx(0.05)
+
+
+def test_conformal_offset_narrows_a_band_that_is_too_wide():
+    y = pd.Series([1.0] * 10)
+    assert conformal_offset(y, y - 0.5, y + 0.5) == pytest.approx(-0.5)
+
+
+def test_calibrated_band_reaches_the_target_on_new_data():
+    # A band of +-0.5 around zero catches only ~38 % of standard normal values.
+    # Calibrated on one sample, it should catch close to 80 % of a fresh sample.
+    rng = np.random.default_rng(0)
+    cal, new = pd.Series(rng.normal(size=5000)), pd.Series(rng.normal(size=5000))
+    half = pd.Series(0.5, index=cal.index)
+    offset = conformal_offset(cal, -half, half)
+    coverage = ((new >= -0.5 - offset) & (new <= 0.5 + offset)).mean()
+    assert 0.78 < coverage < 0.82

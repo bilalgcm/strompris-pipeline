@@ -14,6 +14,8 @@ Compared side by side:
     model_v2_zone same features as model_v2, but one model per area (live for ZONE_MODELS since Oct 2026)
     low / high    80 % prediction interval from quantile models (10th and 90th percentile),
                   using the live routing. Scored on coverage, width and pinball loss.
+    low_cal / high_cal  the same band, widened (or narrowed) by an offset measured on the
+                  3 months before each test month (split conformal prediction)
 
 Usage (from the repo root, after `python model/export_data.py`):
     python model/backtest.py            # last 12 months
@@ -39,6 +41,8 @@ AREAS = ["NO1", "NO2", "NO3", "NO4", "NO5"]
 METHODS = ["naive_24h", "naive_168h", "model_no1", "model_v2", "model_v2_zone"]
 EVENING_DROP = 0.30  # previous day's 23:00 price at least 30 % below its daily mean
 Q_LOW, Q_HIGH = 0.10, 0.90  # 80 % prediction interval
+TARGET_COVERAGE = Q_HIGH - Q_LOW
+CAL_MONTHS = 3  # calibration window right before each test month (split conformal prediction)
 MIN_TRAIN_HOURS = 24 * 90  # don't train a per-area model on less than ~3 months of history
 
 
@@ -99,7 +103,19 @@ def pinball(y: pd.Series, f: pd.Series, q: float) -> float:
     return float(np.maximum(q * diff, (q - 1) * diff).mean() * 100)
 
 
-def interval_table(results: pd.DataFrame, by: str) -> pd.DataFrame:
+def conformal_offset(y: pd.Series, low: pd.Series, high: pd.Series, coverage: float = TARGET_COVERAGE) -> float:
+    """How much to widen [low, high] so it would have covered `coverage` of y (split conformal / CQR).
+
+    Score per hour = how far the real price fell outside the band (negative if inside).
+    The offset is that score's (n+1)*coverage-th smallest value. A negative offset narrows the band.
+    """
+    scores = np.sort(np.maximum(low - y, y - high).to_numpy())
+    n = len(scores)
+    k = min(n, int(np.ceil((n + 1) * coverage)))
+    return float(scores[k - 1])
+
+
+def interval_table(results: pd.DataFrame, by: str, low: str = "low", high: str = "high") -> pd.DataFrame:
     """How honest and how useful the 80 % interval is, per group.
 
     coverage_pct  share of real prices inside [low, high]; should be close to 80
@@ -110,8 +126,8 @@ def interval_table(results: pd.DataFrame, by: str) -> pd.DataFrame:
     rows = {}
     for key, g in results.groupby(by):
         rows[key] = {
-            "coverage_pct": ((g["price"] >= g["low"]) & (g["price"] <= g["high"])).mean() * 100,
-            "width_ore": (g["high"] - g["low"]).mean() * 100,
+            "coverage_pct": ((g["price"] >= g[low]) & (g["price"] <= g[high])).mean() * 100,
+            "width_ore": (g[high] - g[low]).mean() * 100,
             "pinball_low": pinball(g["price"], g["low_raw"], Q_LOW),
             "pinball_high": pinball(g["price"], g["high_raw"], Q_HIGH),
             "crossed_pct": (g["low_raw"] > g["high_raw"]).mean() * 100,
@@ -133,6 +149,10 @@ def run(prices: pd.DataFrame, weather: pd.DataFrame, n_months: int) -> pd.DataFr
         # Interval models follow the live routing: own models for ZONE_MODELS, the shared NO1 model for the rest
         shared_low = fit(no1[no1["time_start"] < start], FEATURES_V2, Q_LOW)
         shared_high = fit(no1[no1["time_start"] < start], FEATURES_V2, Q_HIGH)
+        # Calibration: models trained before the calibration window, scored on that window
+        cal_start = start - pd.DateOffset(months=CAL_MONTHS)
+        cal_shared = (fit(no1[no1["time_start"] < cal_start], FEATURES_V2, Q_LOW),
+                      fit(no1[no1["time_start"] < cal_start], FEATURES_V2, Q_HIGH))
         for area, df in by_area.items():
             train = df[df["time_start"] < start]
             test = df[(df["time_start"] >= start) & (df["time_start"] < end)].copy()
@@ -153,12 +173,24 @@ def run(prices: pd.DataFrame, weather: pd.DataFrame, n_months: int) -> pd.DataFr
                                      else fit(train, FEATURES_V2).predict(test[FEATURES_V2]))
             if area in ZONE_MODELS:
                 low_model, high_model = fit(train, FEATURES_V2, Q_LOW), fit(train, FEATURES_V2, Q_HIGH)
+                before_cal = df[df["time_start"] < cal_start]
+                cal_low_model, cal_high_model = fit(before_cal, FEATURES_V2, Q_LOW), fit(before_cal, FEATURES_V2, Q_HIGH)
             else:
                 low_model, high_model = shared_low, shared_high
+                cal_low_model, cal_high_model = cal_shared
             test["low_raw"] = low_model.predict(test[FEATURES_V2])
             test["high_raw"] = high_model.predict(test[FEATURES_V2])
             test["low"] = test[["low_raw", "high_raw"]].min(axis=1)
             test["high"] = test[["low_raw", "high_raw"]].max(axis=1)
+
+            # Offset measured on this area's calibration window, applied to the final band
+            cal = df[(df["time_start"] >= cal_start) & (df["time_start"] < start)]
+            cal_lo, cal_hi = cal_low_model.predict(cal[FEATURES_V2]), cal_high_model.predict(cal[FEATURES_V2])
+            offset = conformal_offset(cal["price"], pd.Series(np.minimum(cal_lo, cal_hi), index=cal.index),
+                                      pd.Series(np.maximum(cal_lo, cal_hi), index=cal.index))
+            test["offset"] = offset
+            test["low_cal"] = test["low"] - offset
+            test["high_cal"] = test["high"] + offset
             results.append(test)
         print(f"  {start:%Y-%m} ferdig")
 
@@ -207,12 +239,19 @@ def main() -> None:
     print(f"Timer med kveldsfall dagen foer: {early['evening_drop_before'].sum()} av {len(early)}")
 
     print(f"\n{int((Q_HIGH - Q_LOW) * 100)} % prediksjonsintervall per prisomraade (dekning boer vaere naer 80):")
+    print("Ukalibrert:")
     print(interval_table(results, "area").to_string())
-    print("\nPer maaned, alle omraader:")
-    print(interval_table(results, "test_month").to_string())
+    print(f"Kalibrert (siste {CAL_MONTHS} maaneder foer hver testmaaned):")
+    print(interval_table(results, "area", "low_cal", "high_cal").drop(columns=["pinball_low", "pinball_high", "crossed_pct"]).to_string())
+    print("\nPer maaned, alle omraader, kalibrert:")
+    print(interval_table(results, "test_month", "low_cal", "high_cal").drop(
+        columns=["pinball_low", "pinball_high", "crossed_pct"]).to_string())
+    print("\nGjennomsnittlig utvidelse per omraade (oere/kWh):")
+    print((results.groupby("area")["offset"].mean() * 100).round(1).to_string())
 
     out = DATA_DIR / "backtest.csv"
-    results[["time_start", "area", "test_month", "price", *METHODS, "low", "high", "evening_drop_before"]].to_csv(
+    results[["time_start", "area", "test_month", "price", *METHODS, "low", "high", "low_cal", "high_cal",
+             "evening_drop_before"]].to_csv(
         out, index=False)
     print(f"\nAlle prognoser lagret i {out}")
 
