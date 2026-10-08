@@ -22,6 +22,9 @@ jobs:
       - name: Lint
         run: pip install ruff && ruff check .
 
+      - name: Test
+        run: pip install pytest && python -m pytest -q
+
       - name: Build Docker image
         run: |
           touch model/model.joblib
