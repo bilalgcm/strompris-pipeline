@@ -75,6 +75,8 @@ def test_features_use_real_lags_and_calendar():
     assert row == {
         "hour": 0, "dayofweek": 5, "month": 10, "is_weekend": 1,
         "lag_24h": 1.5, "lag_168h": 0.9, "temperature": 7.0, "temp_24h": 8.5,
+        # Only two prices are known, so the previous day is incomplete
+        "prev_day_mean": None, "prev_day_min": None, "prev_day_max": None, "prev_day_last": None,
     }
 
 

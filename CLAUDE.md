@@ -68,14 +68,10 @@ Original tables:
 
 ## Model architecture
 
-`HistGradientBoostingRegressor` predicting `nok_per_kwh`. The feature list
+`HistGradientBoostingRegressor` predicting `nok_per_kwh`, with 12 features: calendar (`hour`, `dayofweek`, `month`, `is_weekend`), lags (`lag_24h`, `lag_168h`), weather (`temperature`, `temp_24h`) and a summary of the previous Oslo day (`prev_day_mean/min/max/last`, added Oct 2026 after the backtest: NO1 MAE 15.7 vs 17.9 oere, and the bias after sharp evening price drops roughly halved).
 
-```
-["hour", "dayofweek", "month", "is_weekend", "lag_24h", "lag_168h", "temperature", "temp_24h"]
-```
-
-is **duplicated** in `model/save_model.py`, `model/train.py`, and `api/main.py` — keep all three in sync when changing features. Features are built two different ways that must agree:
-- **Training** (`model/features.py`): `add_features` (pure, used by training and the backtest) joins prices and weather on `time_start`, adds calendar fields in `Europe/Oslo`, and looks lags up **by timestamp** (t - 24h, t - 168h), so gaps in the data can't shift them. It also adds `prev_day_mean/min/max/last` (summary of the previous Oslo day). These are **not used by the live model yet**; `model/backtest.py` evaluates them as `model_v2`, and they only go live (in `save_model.py`, `api/main.py` FEATURES and `api/forecasting.py`) if the backtest shows they're better.
+The list lives in `api/forecasting.py::FEATURES` and `model/save_model.py::FEATURES`. `tests/test_model_artifact.py` checks that the two match, that `model/model.joblib` was trained on exactly those names, and that serving computes the same values as training (including across DST). **Changing features means retraining and committing `model.joblib` in the same push**, or CI fails. Features are built two ways that must agree:
+- **Training** (`model/features.py`): `add_features` (pure, used by training and the backtest) joins prices and weather on `time_start`, adds calendar fields in `Europe/Oslo`, and looks lags up **by timestamp** (t - 24h, t - 168h), so gaps in the data can't shift them. It also adds `prev_day_mean/min/max/last` (summary of the previous Oslo day, NaN if that day has fewer than 23 hours).
 - **Serving** (`api/main.py::_compute_forecast` + `api/forecasting.py`): reconstructs the same 8 features per future hour in Python, pulling recent prices/temps from the DB and future temps live from Open-Meteo. The forecast window starts after the newest stored price and runs to the end of the next Oslo day (`forecast_hours`), so it never covers hours whose real price is already published: before ~13:00 that is tomorrow, after publication the day after tomorrow.
 
 The model is **trained on NO1 only** but served for every zone via `?area=NO1..NO5`. The train/test split cutoff lives in `model/baseline.py` (`CUTOFF`).

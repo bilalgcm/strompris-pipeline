@@ -8,6 +8,14 @@ from datetime import UTC, date, datetime, timedelta
 
 from api.freshness import OSLO
 
+# The live model's inputs, in order. Must match model/save_model.py (a test checks this,
+# and that the saved model/model.joblib was trained on exactly these names).
+FEATURES = [
+    "hour", "dayofweek", "month", "is_weekend", "lag_24h", "lag_168h", "temperature", "temp_24h",
+    "prev_day_mean", "prev_day_min", "prev_day_max", "prev_day_last",
+]
+MIN_HOURS_PER_DAY = 23  # same rule as model/features.py: fewer hours = incomplete day
+
 
 def oslo_today(now: datetime | None = None) -> date:
     """Today's date in Oslo. date.today() on Fly is UTC, which is wrong 00:00-02:00 Oslo time."""
@@ -41,12 +49,27 @@ def forecast_hours(latest: datetime) -> list[datetime]:
     return hours
 
 
-def build_feature_rows(hours: list[datetime], known_prices: dict, known_temps: dict) -> list[dict]:
-    """Build the model's 8 features for each forecast hour, the same way model/features.py does.
+def previous_day_summary(known_prices: dict, day: date) -> dict | None:
+    """Mean, min, max and last price of one Oslo day, or None if the day is incomplete.
 
-    Lags are counted in UTC hours, which matches training (24 rows back in hourly UTC data).
+    Mirrors model/features.py::add_previous_day, so serving and training agree.
+    """
+    start, end = oslo_midnight(day), oslo_midnight(day + timedelta(days=1))
+    points = sorted((t, p) for t, p in known_prices.items() if start <= t.astimezone(UTC) < end)
+    if len(points) < MIN_HOURS_PER_DAY:
+        return None
+    prices = [p for _, p in points]
+    return {"mean": sum(prices) / len(prices), "min": min(prices), "max": max(prices), "last": prices[-1]}
+
+
+def build_feature_rows(hours: list[datetime], known_prices: dict, known_temps: dict) -> list[dict]:
+    """Build the model's features (FEATURES) for each forecast hour, the same way model/features.py does.
+
+    Lags are counted in UTC hours, which matches training (looked up by timestamp).
+    The previous-day summary uses the Oslo day before each hour's own day.
     Missing values become None; HistGradientBoostingRegressor handles them natively.
     """
+    summaries: dict[date, dict | None] = {}
     rows = []
     for t in hours:
         local = t.astimezone(OSLO)
@@ -60,4 +83,10 @@ def build_feature_rows(hours: list[datetime], known_prices: dict, known_temps: d
             "temperature": known_temps.get(t),
             "temp_24h": known_temps.get(t - timedelta(hours=24)),
         })
+        prev_day = local.date() - timedelta(days=1)
+        if prev_day not in summaries:
+            summaries[prev_day] = previous_day_summary(known_prices, prev_day)
+        summary = summaries[prev_day] or {}
+        for key in ("mean", "min", "max", "last"):
+            rows[-1][f"prev_day_{key}"] = summary.get(key)
     return rows

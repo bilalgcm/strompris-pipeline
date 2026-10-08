@@ -26,6 +26,7 @@ from api.comparison import (
 )
 from api.costs import Nettleie, markup_from_invoice, norgespris_cost, spot_cost
 from api.forecasting import (
+    FEATURES,
     build_feature_rows,
     forecast_hours,
     oslo_midnight,
@@ -44,7 +45,6 @@ DB_CONN = os.environ.get(
 OSLO = ZoneInfo("Europe/Oslo")
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("strompris")
-FEATURES = ["hour", "dayofweek", "month", "is_weekend", "lag_24h", "lag_168h", "temperature", "temp_24h"]
 MODEL = joblib.load("model/model.joblib")
 LLM = anthropic.Anthropic()
 
