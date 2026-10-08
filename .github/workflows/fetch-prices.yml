@@ -77,3 +77,9 @@ jobs:
           # The 20:00 run and manual runs check today and tomorrow.
           CHECK_TOMORROW: ${{ github.event.schedule != '30 12 * * *' }}
         run: python ingest/quality.py
+      - name: Fetch household consumption (Elhub open data)
+        # Last step on purpose: if Elhub is down the run turns red, but prices and the
+        # quality check above have already run. Re-fetches 16 days, since Elhub corrects values.
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: cd ingest && python fetch_household.py
