@@ -1,6 +1,7 @@
 import os
 import threading
 import time
+import logging
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -21,6 +22,7 @@ DB_CONN = os.environ.get(
     f"host={os.environ.get('DB_HOST', 'localhost')} port=5432 dbname=strompris user=strom password=strom"
 )
 OSLO = ZoneInfo("Europe/Oslo")
+log = logging.getLogger("strompris")
 FEATURES = ["hour", "dayofweek", "month", "is_weekend", "lag_24h", "lag_168h", "temperature", "temp_24h"]
 MODEL = joblib.load("model/model.joblib")
 LLM = anthropic.Anthropic()
@@ -93,22 +95,26 @@ def health():
         latest_price = {area: ts for area, ts in price_rows}
         forecast_rows = run_query("SELECT max(time_start) FROM forecasts;", ())
         latest_forecast = forecast_rows[0][0] if forecast_rows else None
-    except Exception as e:
-        return {"status": "error", "detail": f"{type(e).__name__}: {e}", "checked_at": now.isoformat()}
+    except Exception:
+        log.exception("Health check failed")
+        return {"status": "error", "checked_at": now.isoformat()}
 
-    # Tomorrow's day-ahead prices publish ~13:00 CET; if they're still missing
-    # for any area after 15:00 Oslo, the nightly pipeline is behind -> stale.
-    tomorrow_start = datetime.combine(now.date() + timedelta(days=1), datetime.min.time(), tzinfo=OSLO)
-    status = "ok"
-    if now.hour >= 15:
-        for area in AREAS:
-            latest = latest_price.get(area)
-            if latest is None or latest.astimezone(OSLO) < tomorrow_start:
-                status = "stale"
-                break
+    # A day is "covered" when we have its last interval (23:00, or 23:45 with
+    # 15-min resolution). Today must always be covered. Tomorrow must be covered
+    # after 16:00, which leaves margin for the 12:30 UTC fetch.
+    today_start = datetime.combine(now.date(), datetime.min.time(), tzinfo=OSLO)
+    tomorrow_start = today_start + timedelta(days=1)
+    required = tomorrow_start + timedelta(days=1) if now.hour >= 16 else tomorrow_start
+
+    stale_areas = [
+        area for area in AREAS
+        if latest_price.get(area) is None
+        or latest_price[area].astimezone(OSLO) < required - timedelta(hours=1)
+    ]
 
     return {
-        "status": status,
+        "status": "stale" if stale_areas else "ok",
+        "stale_areas": stale_areas,
         "latest_price": {
             area: (latest_price[area].isoformat() if latest_price.get(area) else None)
             for area in AREAS

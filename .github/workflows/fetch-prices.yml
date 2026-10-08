@@ -2,7 +2,8 @@ name: Fetch Daily Prices
 
 on:
   schedule:
-    - cron: '0 20 * * *'
+    - cron: '30 12 * * *'   # 13:30 winter / 14:30 summer Oslo, after day-ahead publication
+    - cron: '0 20 * * *'    # evening retry
   workflow_dispatch:
 
 jobs:
