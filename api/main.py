@@ -12,11 +12,19 @@ import pandas as pd
 import psycopg
 import requests
 from dotenv import load_dotenv
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse
 
 from api.appliances import APPLIANCES, appliance_report, current_index
-from api.costs import Nettleie, norgespris_cost, spot_cost
+from api.comparison import (
+    Hour,
+    compare,
+    complete_months,
+    hours_in_month,
+    month_bounds,
+    spread_monthly_kwh,
+)
+from api.costs import Nettleie, markup_from_invoice, norgespris_cost, spot_cost
 from api.forecasting import (
     build_feature_rows,
     forecast_hours,
@@ -209,6 +217,55 @@ def get_cost_now(area: str = AREA, markup: float = MARKUP, nettleie_day: float |
             "appliances": [appliance_report(times, totals, now_index, a) for a in APPLIANCES],
         }
     return result
+
+
+# Hours that have both a stored price and Elhub household consumption, per Oslo month
+MONTH_COUNTS_SQL = """
+    SELECT to_char(p.time_start AT TIME ZONE 'Europe/Oslo', 'YYYY-MM') AS month, count(*)
+    FROM prices p
+    JOIN household_consumption h ON h.price_area = p.price_area AND h.time_start = p.time_start
+    WHERE p.price_area = %s AND p.time_start >= now() - interval '13 months'
+    GROUP BY month;
+"""
+
+MONTH_HOURS_SQL = """
+    SELECT p.time_start, p.nok_per_kwh, h.quantity_kwh / h.metering_points AS kwh_per_home
+    FROM prices p
+    JOIN household_consumption h ON h.price_area = p.price_area AND h.time_start = p.time_start
+    WHERE p.price_area = %s AND p.time_start >= %s AND p.time_start < %s
+    ORDER BY p.time_start;
+"""
+
+
+@app.get("/compare/months")
+def compare_months(area: str = AREA):
+    """Months that can be compared: every hour has both a price and household data. Newest first."""
+    counts = {month: n for month, n in run_query(MONTH_COUNTS_SQL, (area,))}
+    return {"area": area, "months": complete_months(counts)}
+
+
+@app.get("/compare")
+def compare_spot_norgespris(
+    area: str = AREA,
+    month: str = Query(pattern=r"^\d{4}-(0[1-9]|1[0-2])$", description="Oslo month, e.g. 2026-09"),
+    kwh: float = Query(gt=0, le=50000, description="Your total use that month, from the invoice"),
+    paslag_ore: float = Query(default=0.0, ge=-50, le=200, description="Supplier markup in oere/kWh incl. VAT, as on the invoice"),
+):
+    """What one month of your consumption cost on spot (with stroemstoette) vs. what Norgespris would have cost.
+
+    Your monthly kWh is spread over the hours using the average household's hourly
+    pattern in your price area (Elhub open data). Nettleie is left out: it's the
+    same on both options. See api/comparison.py.
+    """
+    start, end = month_bounds(month)
+    rows = run_query(MONTH_HOURS_SQL, (area, start, end))
+    if len(rows) != hours_in_month(month):
+        raise HTTPException(status_code=404, detail=f"Mangler data for {month} i {area}. Velg en annen måned.")
+
+    spread = spread_monthly_kwh(kwh, [(ts, float(per_home)) for ts, _, per_home in rows])
+    hours = [Hour(ts, used, float(spot)) for (ts, used), (_, spot, _) in zip(spread, rows, strict=True)]
+    markup = markup_from_invoice(paslag_ore, area)
+    return {"area": area, "month": month, "paslag_ore": paslag_ore, **compare(hours, area, markup)}
 
 
 @app.get("/stats")
