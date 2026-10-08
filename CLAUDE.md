@@ -88,6 +88,10 @@ The shared model is trained on NO1 and serves NO1, NO3 and NO5; NO2 and NO4 use 
 
 GitHub runs scheduled workflows best effort (often hours late, sometimes skipped), so the API also self-heals: `api/refresh.py` checks at most every 10 minutes, on requests to `/prices`, `/forecast` and `/summary`, whether today's (or after 13:00, tomorrow's) prices are missing, and fetches them from hvakosterstrommen.no in a background thread. `/health` only observes and never triggers a fetch, so it still reveals pipeline problems.
 
+## Monthly retrain
+
+`.github/workflows/retrain.yml` runs on the 1st of each month (or manually): `model/retrain_report.py` scores the **live** models on the last complete month (MAE vs. "same as yesterday", calibrated band coverage), then `save_model.py` retrains everything, the full test suite runs, and a pull request `retrain/YYYY-MM` is opened with the report. Nothing deploys until it is merged. PRs opened with `GITHUB_TOKEN` don't trigger `ci.yml`, which is why the tests run inside the retrain job. Requires the repo setting that allows Actions to create pull requests.
+
 ## Deployment
 
 Push to `main` → `.github/workflows/fly-deploy.yml` runs `flyctl deploy --remote-only`. The `Dockerfile` ships **only** `api/` + `model/*.joblib` + `model/interval_offsets.json` and the installed deps — ingestion and training code are intentionally not in the image. The one exception is the small self-healing fetch in `api/refresh.py`, which duplicates the URL and upsert from `ingest/` on purpose to keep that boundary. The model files are force-tracked in git via `.gitignore` negations (`!model/model.joblib`, `!model/model_*.joblib`) despite the global `*.joblib` ignore; commit freshly trained models to ship them.

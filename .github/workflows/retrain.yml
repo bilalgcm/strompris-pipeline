@@ -1,0 +1,81 @@
+name: Monthly retrain
+
+# Retrains all models and the interval calibration on the 1st of every month and opens a
+# pull request with a report. Nothing goes live until a human merges it; the merge then
+# deploys through the normal Fly Deploy workflow.
+#
+# One-time setup: Settings > Actions > General > Workflow permissions:
+#   "Read and write permissions" and "Allow GitHub Actions to create and approve pull requests".
+
+on:
+  schedule:
+    - cron: '23 4 1 * *'   # 1st of the month, 06:23 Oslo summer time (05:23 winter)
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  retrain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt pytest
+
+      - name: Report on the live models before replacing them
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: python model/retrain_report.py > retrain_report.md
+
+      - name: Retrain models and calibration
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: python model/save_model.py | tee retrain_log.txt
+
+      - name: Test the new models
+        # PRs opened with GITHUB_TOKEN don't trigger the CI workflow (a GitHub rule against loops),
+        # so the full suite runs here instead. A failure stops the job before any PR is opened.
+        run: python -m pytest -q | tee test_log.txt
+
+      - name: Open pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          month=$(date -u +%Y-%m)
+          branch="retrain/$month"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$branch"
+          git add model/*.joblib model/interval_offsets.json
+          if git diff --cached --quiet; then
+            echo "Models unchanged, nothing to open."
+            exit 0
+          fi
+          git commit -m "chore: monthly retrain $month"
+          git push -u origin "$branch"
+          {
+            cat retrain_report.md
+            echo
+            echo "## New calibration margins (oere/kWh, added to each side of the 80 % band)"
+            echo
+            echo '```'
+            grep "kalibrering" retrain_log.txt
+            echo '```'
+            echo
+            echo "## Tests on the new models"
+            echo
+            echo '```'
+            tail -1 test_log.txt
+            echo '```'
+            echo
+            echo "Merge to deploy. Close to keep the current models."
+          } > pr_body.md
+          gh pr create --title "Monthly retrain $month" --body-file pr_body.md --base main --head "$branch"
