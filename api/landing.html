@@ -512,7 +512,30 @@ document.getElementById('ask-input').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') askQuestion();
 });
 
-function loadAll() { loadCost(); loadCompareMonths(); loadSummary(); loadChart(); loadAccuracy(); }
+// After 13:00 the API fetches missing prices itself when GitHub is late (api/refresh.py),
+// but in the background, so the first page load can be answered just before they're saved.
+// If /health says this area is still waiting, ask again a few times and redraw once they're in.
+// /health only observes, so these checks never start extra fetches.
+const RECHECK_MS = 10000, RECHECK_TRIES = 3;
+let recheckRun = 0;
+async function recheckUntilPublished() {
+  const run = ++recheckRun, area = getArea();
+  for (let attempt = 0; attempt <= RECHECK_TRIES; attempt++) {
+    if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, RECHECK_MS));
+    if (run !== recheckRun) return;  // the area changed and a newer check took over
+    try {
+      const health = await (await fetch('/health')).json();
+      if (!(health.awaiting_prices || []).includes(area)) {
+        if (attempt > 0) loadAll();  // the prices arrived after the first load
+        return;
+      }
+    } catch (e) {
+      return;
+    }
+  }
+}
+
+function loadAll() { loadCost(); loadCompareMonths(); loadSummary(); loadChart(); loadAccuracy(); recheckUntilPublished(); }
 document.getElementById('area').addEventListener('change', loadAll);
 loadAll();
 </script>

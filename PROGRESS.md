@@ -1,10 +1,10 @@
 # Strømpris Pipeline: project status
 
-Last updated: 9 October 2026
+Last updated: 19 October 2026
 
 ## Where it stands
 
-Live at [strompris-pipeline.fly.dev](https://strompris-pipeline.fly.dev/). Prices for all five areas since September 2022, updated several times a day. 176 automated tests run in CI on every push, followed by a Docker build and an automatic deploy to Fly.io.
+Live at [strompris-pipeline.fly.dev](https://strompris-pipeline.fly.dev/). Prices for all five areas since September 2022, updated several times a day. 200 automated tests run in CI on every push, followed by a Docker build and an automatic deploy to Fly.io.
 
 ## Timeline
 
@@ -21,6 +21,8 @@ Live at [strompris-pipeline.fly.dev](https://strompris-pipeline.fly.dev/). Price
 - `/health` reports data freshness per area; the nightly job fails loudly on missing or invalid data
 - Scheduled job runs three times a day, and the API fetches missing prices itself when GitHub runs late
 - Found and fixed: weather updates had silently stopped on 24 July 2026 (the archive API rejected recent dates)
+- Found and fixed: the evening run started after midnight (GitHub runs about 5 hours late) and failed every night on a day that wasn't published yet; the check now goes by the Oslo clock
+- The page redraws by itself when prices arrive just after it loaded, instead of showing a forecast for a day that is already published
 - Found and fixed: "today" was computed in UTC in several places, and plain dates in SQL were compared against UTC midnight
 
 **What it actually costs**

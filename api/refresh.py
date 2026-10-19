@@ -16,12 +16,11 @@ from datetime import date, datetime, timedelta
 
 import requests
 
-from api.freshness import OSLO, find_stale_areas
+from api.freshness import OSLO, PUBLISH_HOUR, find_stale_areas
 
 log = logging.getLogger("strompris")
 
 BASE_URL = "https://www.hvakosterstrommen.no/api/v1"
-PUBLISH_HOUR = 13  # day-ahead prices are usually on hvakosterstrommen.no by 13-14 Oslo time
 CHECK_INTERVAL = 600  # seconds between checks, so we don't query on every request
 HTTP_TIMEOUT = 10  # seconds per request
 

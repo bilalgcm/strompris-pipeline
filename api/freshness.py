@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 OSLO = ZoneInfo("Europe/Oslo")
 AREAS = ["NO1", "NO2", "NO3", "NO4", "NO5"]
 TOMORROW_DEADLINE_HOUR = 16  # tomorrow's prices must be stored by 16:00 Oslo time
+PUBLISH_HOUR = 13  # day-ahead prices are usually on hvakosterstrommen.no by 13-14 Oslo time
 
 
 def find_stale_areas(
@@ -30,3 +31,12 @@ def find_stale_areas(
         area for area in AREAS
         if latest_price.get(area) is None or latest_price[area].astimezone(OSLO) < required
     ]
+
+
+def awaiting_prices(latest_price: dict, now: datetime) -> list[str]:
+    """Areas whose prices are probably published but not stored yet.
+
+    Same rule as the self-healing refresh (from 13:00 tomorrow is expected), so a page
+    that sees its area here knows a fetch is coming and can ask again shortly.
+    """
+    return find_stale_areas(latest_price, now, deadline_hour=PUBLISH_HOUR)

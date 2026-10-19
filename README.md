@@ -66,7 +66,7 @@ hvakosterstrommen.no     Open-Meteo        Elhub open data
 
 ## Engineering
 
-- **176 automated tests**, run in CI on every push together with linting and a Docker build. Rules like strømstøtte, DST days and holiday rates are tested against hand-calculated numbers.
+- **200 automated tests**, run in CI on every push together with linting and a Docker build. Rules like strømstøtte, DST days and holiday rates are tested against hand-calculated numbers.
 - **Guard tests for the models.** CI fails if the API's feature list, the training script and the saved model files ever disagree, or if serving computes a feature differently from training. A model change can't reach production half-done.
 - **Failures are loud.** A health endpoint reports data freshness per area, and the nightly job fails if prices or weather are missing or implausible. Before these checks, weather updates had silently stopped for 2.5 months, and the scheduled job was regularly hours late. Both were found by measuring, then fixed.
 - **Monthly retraining with a human in the loop.** A scheduled job retrains every model and the interval calibration, reports how the live models did last month against the naive baseline, runs the full test suite, and opens a pull request. Nothing ships until it's merged.
@@ -87,7 +87,7 @@ hvakosterstrommen.no     Open-Meteo        Elhub open data
 | Endpoint | What it returns |
 |---|---|
 | `/` | The landing page |
-| `/health` | Data freshness per price area (`ok` / `stale` / `error`) |
+| `/health` | Data freshness per price area (`ok` / `stale` / `error`), and areas whose published prices are still being fetched |
 | `/prices` | Hourly spot prices, filter by date range |
 | `/stats` | Average, min and max over a period |
 | `/prices/by-hour` | Average price per hour of day across all history |

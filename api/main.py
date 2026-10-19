@@ -37,7 +37,7 @@ from api.forecasting import (
     oslo_midnight,
     oslo_today,
 )
-from api.freshness import AREAS, find_stale_areas
+from api.freshness import AREAS, awaiting_prices, find_stale_areas
 from api.prompts import price_context, price_facts
 from api.refresh import UPSERT_SQL, PriceRefresher, fetch_day
 
@@ -126,7 +126,11 @@ def cached(cache, area, compute):
 @app.get("/health")
 def health():
     """Report data freshness. Always HTTP 200; status lives in the body so Fly
-    autostart / uptime monitors never flap. status is one of ok | stale | error."""
+    autostart / uptime monitors never flap. status is one of ok | stale | error.
+
+    Only observes, never starts a fetch, so it still shows when the pipeline is behind.
+    awaiting_prices lists areas whose prices are published but not stored yet; the
+    landing page uses it to redraw once the self-healing fetch has saved them."""
     now = datetime.now(OSLO)
     try:
         latest_price = latest_price_per_area()
@@ -141,6 +145,7 @@ def health():
     return {
         "status": "stale" if stale_areas else "ok",
         "stale_areas": stale_areas,
+        "awaiting_prices": awaiting_prices(latest_price, now),
         "latest_price": {
             area: (latest_price[area].isoformat() if latest_price.get(area) else None)
             for area in AREAS
