@@ -3,7 +3,7 @@ import logging
 import os
 import threading
 import time
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -318,7 +318,7 @@ def fetch_forecast_temps():
         resp.raise_for_status()
         data = resp.json()
         return {
-            datetime.fromisoformat(t).replace(tzinfo=timezone.utc): temp
+            datetime.fromisoformat(t).replace(tzinfo=UTC): temp
             for t, temp in zip(data["hourly"]["time"], data["hourly"]["temperature_2m"])
             if temp is not None
         }

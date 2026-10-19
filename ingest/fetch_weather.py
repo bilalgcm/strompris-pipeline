@@ -1,6 +1,6 @@
 import os
 import sys
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 
 import psycopg
 import requests
@@ -51,14 +51,14 @@ def fetch_recent_weather(past_days=7, now=None):
         "forecast_days": 1,
     }, timeout=30)
     response.raise_for_status()
-    return only_past(response.json(), now or datetime.now(timezone.utc))
+    return only_past(response.json(), now or datetime.now(UTC))
 
 
 def only_past(data, now):
     """Keep (time, temperature) pairs for hours that have started. Times are UTC strings like 2026-10-08T21:00."""
     times, temps = [], []
     for t, temp in zip(data["hourly"]["time"], data["hourly"]["temperature_2m"]):
-        if datetime.fromisoformat(t).replace(tzinfo=timezone.utc) <= now:
+        if datetime.fromisoformat(t).replace(tzinfo=UTC) <= now:
             times.append(t)
             temps.append(temp)
     return times, temps
@@ -67,7 +67,7 @@ def only_past(data, now):
 def save_weather(times, temps, location="oslo"):
     """Upsert hourly temperatures into Postgres."""
     rows = [
-        (location, datetime.fromisoformat(t).replace(tzinfo=timezone.utc), round(temp, 1))
+        (location, datetime.fromisoformat(t).replace(tzinfo=UTC), round(temp, 1))
         for t, temp in zip(times, temps)
         if temp is not None
     ]

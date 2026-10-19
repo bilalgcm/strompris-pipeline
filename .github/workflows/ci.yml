@@ -20,7 +20,8 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Lint
-        run: pip install ruff && ruff check .
+        # Pinned: an unpinned install picked up ruff 0.17, whose new rules failed CI on old code
+        run: pip install ruff==0.17.1 && ruff check .
 
       - name: Test
         run: pip install pytest -r mcp_server/requirements.txt && python -m pytest -q
