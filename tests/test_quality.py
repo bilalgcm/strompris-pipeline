@@ -1,6 +1,14 @@
 from datetime import UTC, date, datetime, timedelta
 
-from ingest.quality import check_day, check_weather, day_bounds, days_to_check
+from api.freshness import OSLO
+from api.freshness import TOMORROW_DEADLINE_HOUR as API_DEADLINE
+from ingest.quality import (
+    TOMORROW_DEADLINE_HOUR,
+    check_day,
+    check_weather,
+    day_bounds,
+    days_to_check,
+)
 
 DAY = date(2026, 10, 8)
 
@@ -61,9 +69,40 @@ def test_negative_prices_are_allowed():
     assert check_day(DAY, make_day(DAY, price=-0.05)) == []
 
 
-def test_days_to_check():
-    assert days_to_check(DAY, check_tomorrow=False) == [DAY]
-    assert days_to_check(DAY, check_tomorrow=True) == [DAY, date(2026, 10, 9)]
+def oslo(*args):
+    return datetime(*args, tzinfo=OSLO)
+
+
+def test_days_to_check_only_today_before_deadline():
+    assert days_to_check(oslo(2026, 10, 8, 14, 30)) == [DAY]
+    assert days_to_check(oslo(2026, 10, 8, 15, 59)) == [DAY]
+
+
+def test_days_to_check_includes_tomorrow_from_deadline():
+    assert days_to_check(oslo(2026, 10, 8, 16, 0)) == [DAY, date(2026, 10, 9)]
+    assert days_to_check(oslo(2026, 10, 8, 19, 32)) == [DAY, date(2026, 10, 9)]
+
+
+def test_late_evening_run_after_midnight_checks_only_the_new_day():
+    # The real failure: the 20:17 UTC run started at 22:28 UTC on 18 Oct, which is
+    # 00:28 on 19 Oct in Oslo. It must check 19 Oct only, not the unpublished 20 Oct.
+    assert days_to_check(datetime(2026, 10, 18, 22, 28, tzinfo=UTC)) == [date(2026, 10, 19)]
+
+
+def test_days_to_check_uses_oslo_time_not_utc():
+    # 15:30 UTC is 17:30 Oslo in October (UTC+2): past the deadline
+    assert days_to_check(datetime(2026, 10, 8, 15, 30, tzinfo=UTC)) == [DAY, date(2026, 10, 9)]
+    # 14:30 UTC is 15:30 Oslo in winter (UTC+1): before the deadline
+    assert days_to_check(datetime(2026, 11, 8, 14, 30, tzinfo=UTC)) == [date(2026, 11, 8)]
+
+
+def test_days_to_check_on_dst_day():
+    autumn = date(2026, 10, 25)  # 25 hours
+    assert days_to_check(oslo(2026, 10, 25, 17)) == [autumn, date(2026, 10, 26)]
+
+
+def test_deadline_matches_health_endpoint():
+    assert TOMORROW_DEADLINE_HOUR == API_DEADLINE
 
 
 # --- weather ---------------------------------------------------------------

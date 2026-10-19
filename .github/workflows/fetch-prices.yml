@@ -24,13 +24,16 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: |
           cd ingest && python -c "
-          from datetime import date, timedelta
+          from datetime import datetime, timedelta
+          from zoneinfo import ZoneInfo
           from fetch_prices import fetch_prices
           from store import save_prices
           from fetch_weather import fetch_recent_weather, save_weather
 
+          # Oslo date, not date.today(): the runner is in UTC, and late runs cross midnight
+          today = datetime.now(ZoneInfo('Europe/Oslo')).date()
           for area in ['NO1', 'NO2', 'NO3', 'NO4', 'NO5']:
-              for d in [date.today(), date.today() + timedelta(days=1)]:
+              for d in [today, today + timedelta(days=1)]:
                   try:
                       prices = fetch_prices(d, area)
                       save_prices(prices, area)
@@ -72,11 +75,9 @@ jobs:
                   print(f'Forecast {area}: feilet ({e})')
           "
       - name: Data-quality check
+        # Checks tomorrow only after 16:00 Oslo time, whichever cron fired (see quality.py)
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          # The 12:30 run only checks today, because tomorrow may not be published yet.
-          # The 20:00 run and manual runs check today and tomorrow.
-          CHECK_TOMORROW: ${{ github.event.schedule != '30 12 * * *' }}
         run: python ingest/quality.py
       - name: Fetch household consumption (Elhub open data)
         # Last step on purpose: if Elhub is down the run turns red, but prices and the

@@ -11,6 +11,7 @@ so the nightly run re-fetches 16 days and upserts. No API key is needed.
 import os
 import sys
 from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import requests
 
@@ -81,7 +82,8 @@ def save(rows: list[tuple]) -> None:
 
 
 def main() -> None:
-    today = date.today()
+    # Oslo date: the GitHub runner is in UTC, and the evening run often starts after midnight
+    today = datetime.now(ZoneInfo("Europe/Oslo")).date()
     start = date.fromisoformat(sys.argv[1]) if len(sys.argv) > 1 else today - timedelta(days=NIGHTLY_DAYS)
     total = 0
     for chunk_start, chunk_end in date_chunks(start, today + timedelta(days=1)):

@@ -5,8 +5,6 @@ when something is wrong, so the run turns red and GitHub sends an email.
 
 Environment variables:
     DATABASE_URL     Postgres connection string (required)
-    CHECK_TOMORROW   "true" (default) or "false". The 12:30 UTC run sets "false",
-                     because tomorrow's prices may not be published yet.
 """
 
 import os
@@ -22,6 +20,11 @@ AREAS = ["NO1", "NO2", "NO3", "NO4", "NO5"]
 # kroner) and garbage values, not real price spikes. Negative prices do happen.
 MIN_PRICE, MAX_PRICE = -5.0, 50.0
 
+# Tomorrow's prices must be stored by 16:00 Oslo. Same deadline as /health
+# (TOMORROW_DEADLINE_HOUR in api/freshness.py). A copy, because this script runs on its
+# own in GitHub Actions without the api package; a test keeps the two equal.
+TOMORROW_DEADLINE_HOUR = 16
+
 
 def day_bounds(day: date) -> tuple[datetime, datetime]:
     """Start and end of an Oslo calendar day, returned in UTC.
@@ -34,8 +37,18 @@ def day_bounds(day: date) -> tuple[datetime, datetime]:
     return start.astimezone(UTC), end.astimezone(UTC)
 
 
-def days_to_check(today: date, check_tomorrow: bool) -> list[date]:
-    return [today, today + timedelta(days=1)] if check_tomorrow else [today]
+def days_to_check(now: datetime) -> list[date]:
+    """Today always, tomorrow only from TOMORROW_DEADLINE_HOUR Oslo time.
+
+    Decided from the clock, not from which cron fired. GitHub often starts scheduled runs
+    hours late: the 20:17 UTC run started after midnight Oslo time, where "tomorrow" is a
+    day that isn't published until 13:00, so the check failed every night.
+    """
+    now = now.astimezone(OSLO)
+    today = now.date()
+    if now.hour >= TOMORROW_DEADLINE_HOUR:
+        return [today, today + timedelta(days=1)]
+    return [today]
 
 
 def check_day(day: date, rows: list[tuple[datetime, float | None]]) -> list[str]:
@@ -88,13 +101,13 @@ def check_weather(latest: datetime | None, today: date) -> list[str]:
 def main() -> int:
     import psycopg  # imported here so the tests don't need a database driver
 
-    check_tomorrow = os.environ.get("CHECK_TOMORROW", "true").lower() == "true"
-    today = datetime.now(OSLO).date()
+    now = datetime.now(OSLO)
+    today = now.date()
     failures = 0
 
     with psycopg.connect(os.environ["DATABASE_URL"]) as conn, conn.cursor() as cur:
         for area in AREAS:
-            for day in days_to_check(today, check_tomorrow):
+            for day in days_to_check(now):
                 start, end = day_bounds(day)
                 cur.execute(
                     "SELECT time_start, nok_per_kwh FROM prices "
